@@ -1,0 +1,66 @@
+### model
+# Qwen3-4B-Instruct PLE 初始化模型（本地路径）
+# NOTE:----------Double check this one!----------
+model_name_or_path: ./models/qwen3_4b_instruct_ple_initialized
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+# Qwen3-4B-Instruct PLE ≈ 5.8B 参数（4B 基础 + MLP 额外 ~1.8B），
+# 4×A100-80GB 用 DeepSpeed Z2 即可；如 OOM 可切换 Z3
+deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
+
+### dataset
+# NOTE:----------Double check this one!----------
+dataset_dir: train/data
+dataset: naive-mix_140k
+# NOTE:----------Double check this one!----------
+# Qwen3 使用 qwen3 template（区别于 Qwen2.5 的 qwen25 template）
+template: qwen3
+cutoff_len: 16384
+max_samples: 100000000
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 2
+# NOTE:----------Double check this one!----------
+default_system: ""
+
+
+### output
+# NOTE:----------Double check this one!----------
+output_dir: train/saves/qwen3_4b_instruct_140k_a100
+save_only_model: true
+logging_steps: 1
+# NOTE:----------Double check this one!----------
+save_steps: 5000
+plot_loss: true
+overwrite_output_dir: false
+report_to: wandb  # choices: [none, wandb, tensorboard, swanlab, mlflow]
+# NOTE:----------Double check this one!----------
+run_name: Qwen3-4B-Instruct-PLE_140k_a100
+
+### train
+# 4B 模型比 7B 小很多，可适当增大 batch size
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 12
+# 有效 batch size = 1 × 12 × 4 GPU = 48（与 Qwen2.5-7B 的 1×12×4=48 相同）
+learning_rate: 1.0e-5
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+# flash_attn: fa2
+
+
+### eval
+# val_size: 0.1
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 500

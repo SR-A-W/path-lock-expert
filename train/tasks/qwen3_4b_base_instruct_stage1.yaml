@@ -1,0 +1,69 @@
+### model
+# Track A2 Stage 1: 在原始 Qwen3-4B-Base 上做通用 Instruct SFT
+# 注意：这里用的是原始 Base 模型，不是 PLE！
+# 目标：赋予 Base 模型 instruction-following 能力，产出"自制 Instruct 模型"（无 CoT 污染）
+# NOTE:----------Double check this one!----------
+model_name_or_path: ./models/source/Qwen/Qwen3-4B-Base
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+# 4B 模型 + 52k 短数据，单 H200 即可，无需 DeepSpeed
+# deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
+
+### dataset
+# 通用 instruct 数据集，通过 LLaMA-Factory 自动从 HuggingFace 下载
+# alpaca_gpt4_en: GPT-4 生成的高质量指令数据（~52k 条）
+# NOTE:----------Double check this one!----------
+dataset_dir: train/data
+dataset: alpaca_gpt4_en
+# NOTE:----------Double check this one!----------
+template: qwen3
+cutoff_len: 4096              # instruct 数据较短，不需要 16k
+max_samples: 100000000
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 2
+# NOTE:----------Double check this one!----------
+default_system: ""
+
+
+### output
+# NOTE:----------Double check this one!----------
+output_dir: train/saves/qwen3_4b_base_instruct_stage1
+save_only_model: true
+logging_steps: 1
+# NOTE:----------Double check this one!----------
+save_steps: 5000
+plot_loss: true
+overwrite_output_dir: false
+report_to: wandb
+# NOTE:----------Double check this one!----------
+run_name: Qwen3-4B-Base-Instruct-Stage1
+
+### train
+# 单 GPU，4B 模型，可用较大 batch
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 6
+# 有效 batch size = 4 × 6 × 1 GPU = 24
+# Base 模型可用稍高的学习率
+learning_rate: 2.0e-5
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+# flash_attn: fa2
+
+
+### eval
+# val_size: 0.1
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 500

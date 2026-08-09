@@ -1,0 +1,47 @@
+### Smoke Test: 8×GPU, cutoff_len=65536, GC ON, ZeRO-2
+### 目的: 候补方案 — 验证 8×H200 能否运行 65K 序列训练
+
+### model
+model_name_or_path: models/qwen3_4b_ple_initialized
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
+gradient_checkpointing: true
+
+### dataset
+dataset_dir: train/data
+dataset: smoke_test_cutoff65k
+template: qwen3
+cutoff_len: 65536
+max_samples: 100
+overwrite_cache: true
+preprocessing_num_workers: 1
+dataloader_num_workers: 0
+default_system: ""
+
+### output
+output_dir: _smoke_test_tmp/output_65k_gc_8gpu_z2
+save_only_model: true
+logging_steps: 1
+save_strategy: "no"
+plot_loss: false
+overwrite_output_dir: true
+report_to: none
+run_name: smoke_test_65k_gc_8gpu_z2
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 1
+learning_rate: 1.0e-5
+max_steps: 1
+lr_scheduler_type: cosine
+warmup_ratio: 0.0
+bf16: true
+ddp_timeout: 180000000

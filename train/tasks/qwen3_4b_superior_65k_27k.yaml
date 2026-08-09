@@ -1,0 +1,61 @@
+### model
+# Qwen3-4B PLE（原始 hybrid-thinking 模型，superior_reasoning 65k+27k）
+# NOTE:----------Double check this one!----------
+model_name_or_path: ./models/qwen3_4b_ple_initialized
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
+gradient_checkpointing: true
+
+### dataset
+# NOTE:----------Double check this one!----------
+dataset_dir: train/data
+dataset: superior_reasoning_65k_27k
+# NOTE:----------Double check this one!----------
+template: qwen3
+cutoff_len: 32768
+max_samples: 100000000
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 2
+# NOTE:----------Double check this one!----------
+default_system: ""
+
+
+### output
+# NOTE:----------Double check this one!----------
+output_dir: train/saves/qwen3_4b_superior_65k_27k
+save_only_model: true
+logging_steps: 1
+# NOTE:----------Double check this one!----------
+save_steps: 5000
+plot_loss: true
+overwrite_output_dir: false
+report_to: wandb
+# NOTE:----------Double check this one!----------
+run_name: Qwen3-4B-PLE_superior_65k_27k
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 24
+learning_rate: 1.0e-5
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+
+### eval
+# val_size: 0.1
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 500

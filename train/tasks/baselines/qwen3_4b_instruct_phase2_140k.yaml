@@ -1,0 +1,67 @@
+# Experiment goal: Baseline — two-phase hybrid-thinking SFT, Phase 2 (no PLE)
+# Method: Two-phase training (Hybrid Thinking ACL2026 paper, Section 3.4 recipe)
+# Design & Settings:
+# 1. Model: Phase 1 checkpoint (from qwen3_4b_instruct_phase1_140k)
+# 2. Training Mode: Phase 2 — "Thinking Mode Fusion", train on mixed think + no_think data
+# 3. Dataset: phase2_140k (mixed, 7/9 of 140k total: 3/9 think + 4/9 no_think)
+# 4. System prompt: empty string
+
+
+### model
+# NOTE:----------Double check this one!----------
+model_name_or_path: train/saves/baselines/qwen3_4b_instruct_phase1_140k
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z3_config.json
+
+### dataset
+# NOTE:----------Double check this one!----------
+dataset_dir: train/data
+dataset: phase2_140k
+# NOTE:----------Double check this one!----------
+template: qwen3
+cutoff_len: 16384
+max_samples: 100000000
+overwrite_cache: true
+preprocessing_num_workers: 16
+dataloader_num_workers: 4
+# NOTE:----------Double check this one!----------
+default_system: ""
+
+
+### output
+# NOTE:----------Double check this one!----------
+output_dir: train/saves/baselines/qwen3_4b_instruct_phase2_140k
+save_only_model: true
+logging_steps: 1
+# NOTE:----------Double check this one!----------
+save_steps: 5000
+plot_loss: true
+overwrite_output_dir: false
+report_to: wandb
+# NOTE:----------Double check this one!----------
+run_name: baseline_Qwen3-4B-Instruct_phase2_140k
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 12
+learning_rate: 1.0e-5
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+
+### eval
+# val_size: 0.1
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 500
