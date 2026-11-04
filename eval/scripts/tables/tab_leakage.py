@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-生成 Tab.2: Leakage 对比表（no_think 模式下 PL-MoE vs Baseline 的 reflective token 和 output length）。
+Generate the leakage comparison table (PL-MoE vs baseline in no_think mode: reflective tokens and output length).
 
 Usage:
     python eval/scripts/tables/tab_leakage.py \
@@ -27,7 +27,7 @@ from table_utils import (
 )
 
 # (PL-MoE model key, Baseline model key, group label)
-# 用户可根据实际可用模型修改
+# Edit according to the models you actually have
 MODEL_PAIRS = [
     ("qwen_pl_moe_140k", "qwen25_7b_baseline", "Qwen2.5-7B"),
     # ("qwen3_4b_instruct_pl_moe_140k", "qwen3_4b_baseline", "Qwen3-4B-Instruct"),
@@ -44,27 +44,27 @@ BENCHMARKS = [
 def generate_table(results_dir: str, output_path: str):
     all_data = load_all_models(results_dir)
 
-    # 过滤出两端都可用的 model pair
+    # Keep only the model pairs where both sides are available
     available_pairs = [
         (pl, bl, label) for pl, bl, label in MODEL_PAIRS
         if pl in all_data and bl in all_data
     ]
 
-    # 如果没有 baseline，退化为仅展示 PL-MoE 的 no_think 数据
+    # If there is no baseline, fall back to showing only the PL-MoE no_think data
     solo_models = []
     if not available_pairs:
-        # 没有 pair，展示所有可用模型的 no_think leakage 数据
+        # No pair available: show the no_think leakage data of all available models
         for pl, bl, label in MODEL_PAIRS:
             if pl in all_data:
                 solo_models.append((pl, label))
         if not solo_models:
-            print(f"警告: 无可用模型。可用: {list(all_data.keys())}")
+            print(f"Warning: no usable models. Available: {list(all_data.keys())}")
             return
 
     lines = []
 
     if available_pairs:
-        # 有 baseline 对比的完整表格
+        # Full table with baseline comparison
         for pair_idx, (pl_key, bl_key, group_label) in enumerate(available_pairs):
             pl_data = all_data[pl_key]
             bl_data = all_data[bl_key]
@@ -107,7 +107,7 @@ def generate_table(results_dir: str, output_path: str):
         lines.append("\\end{tabular}")
 
     else:
-        # 仅展示 PL-MoE 的 no_think leakage 数据（无 baseline）
+        # Show only the PL-MoE no_think leakage data (no baseline)
         lines.append("\\begin{tabular}{lrrr}")
         lines.append(latex_toprule())
         lines.append(latex_row("Benchmark", "Avg Refl.", "Frac w/ Refl.", "Avg Len"))
@@ -136,11 +136,11 @@ def generate_table(results_dir: str, output_path: str):
     output.parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"已生成: {output}")
+    print(f"Generated: {output}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="生成 Leakage 对比表 LaTeX")
+    parser = argparse.ArgumentParser(description="Generate the leakage comparison LaTeX table")
     parser.add_argument("--results-dir", type=str, default="eval/results_json")
     parser.add_argument("--output", type=str, default="eval/tables/tab_leakage.tex")
     args = parser.parse_args()

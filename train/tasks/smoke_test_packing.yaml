@@ -1,7 +1,7 @@
-### Smoke Test: neat_packing 超长样本丢弃验证
-### 目的: 验证 neat_packing=true 能否正确丢弃超出 cutoff_len 的样本
-### 数据集: smoke_test_cutoff65k (2 条数据: 1 条短 + 1 条 72K tokens 长)
-### 预期: cutoff_len=1024 时, 长样本被丢弃并打印警告, 短样本正常参与训练
+### Smoke Test: check that neat_packing drops over-long samples
+### Purpose: check that neat_packing=true correctly drops samples longer than cutoff_len
+### Dataset: smoke_test_cutoff65k (2 samples: 1 short + 1 long with 72K tokens)
+### Expected: with cutoff_len=1024, long samples are dropped with a warning and short samples train normally
 
 ### model
 model_name_or_path: models/qwen3_4b_ple_initialized

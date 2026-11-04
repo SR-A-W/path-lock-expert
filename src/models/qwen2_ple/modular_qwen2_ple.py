@@ -19,17 +19,17 @@
 # limitations under the License.
 """PyTorch Qwen2 Path-Lock Expert (PLE) model.
 
-序列级路由：根据 control token（/think 或 /no_think）在整条序列上固定使用 expert 0 或 expert 1。
-无 gate 网络，路由由控制 token 硬决定。
+Sequence-level routing: the control token (/think or /no_think) fixes expert 0 or expert 1
+for the whole sequence. There is no gate network; routing is decided by the control token.
 
-路由规则：
-- expert 0 = no_think 模式（初始化自 Qwen2.5-7B-Instruct）
-- expert 1 = think 模式（初始化自 DeepSeek-R1-Distill-Qwen-7B）
-- 默认走 expert 0（no_think），因为初始化阶段共享层来自 Qwen2.5，与 expert 0 兼容
-- fine-tune 完成后可根据需求修改 default_routing_index
+Routing rules:
+- expert 0 = no_think mode (initialised from Qwen2.5-7B-Instruct)
+- expert 1 = think mode (initialised from DeepSeek-R1-Distill-Qwen-7B)
+- The default is expert 0 (no_think), since at initialisation the shared layers come from Qwen2.5 and are compatible with expert 0.
+- default_routing_index can be changed after fine-tuning if needed.
 
-注意：当前实现假设同一 batch 内所有序列使用相同的路由（单一 routing_index）。
-若需要 batch 内混合路由（不同序列走不同 expert），需进一步扩展为 per-sample routing。
+Note: all sequences in a batch are assumed to share the same route (a single routing_index).
+Mixed routing within a batch (different experts per sequence) would need per-sample routing.
 """
 
 from typing import Optional
@@ -52,17 +52,17 @@ from .configuration_qwen2_ple import Qwen2PleConfig
 
 
 class Qwen2PleExpertMLP(Qwen2MLP):
-    """单个 MLP 专家（与 Qwen2MLP 结构完全一致），用于 PLE 的双专家容器。"""
+    """A single MLP expert (identical in structure to Qwen2MLP), used in the PLE two-expert container."""
     pass
 
 
 class Qwen2PleMLP(nn.Module):
-    """Path-Lock 双专家 MLP 容器。
+    """Path-Lock two-expert MLP container.
 
-    包含两个独立的 MLP 专家：
-    - experts[0]：no_think 专家
-    - experts[1]：think 专家
-    根据 routing_index 选择使用哪个专家，整条序列一致。
+    Holds two independent MLP experts:
+    - experts[0]: no_think expert
+    - experts[1]: think expert
+    routing_index selects which expert is used; the whole sequence uses the same one.
     """
 
     def __init__(self, config: Qwen2PleConfig):
@@ -74,38 +74,39 @@ class Qwen2PleMLP(nn.Module):
 
 
 def _determine_routing_index(input_ids: torch.LongTensor, config: Qwen2PleConfig) -> int:
-    """根据 input_ids 中的控制 token 确定路由索引。
+    """Determine the routing index from the control tokens in input_ids.
 
-    路由决策逻辑：
-    1. 若 think_token_id 和 no_think_token_id 均未配置 → 返回 default_routing_index
-    2. 扫描 input_ids，找到两种控制 token 各自最后出现的位置
-    3. 以最后出现的控制 token 为准（防御注入：系统模板中的控制 token 通常在用户输入之后）
-    4. 若均未找到 → 返回 default_routing_index
+    Routing logic:
+    1. If neither think_token_id nor no_think_token_id is configured -> return default_routing_index
+    2. Scan input_ids for the last position of each control token
+    3. The control token occurring last wins (injection defence: a control token from the system
+       template normally comes after the user input)
+    4. If neither is found -> return default_routing_index
 
     Args:
-        input_ids: 输入 token 序列，shape [batch_size, seq_len]
-        config: PLE 配置
+        input_ids: input token sequence, shape [batch_size, seq_len]
+        config: PLE config
 
     Returns:
-        int: 0（no_think / expert 0）或 1（think / expert 1）
+        int: 0 (no_think / expert 0) or 1 (think / expert 1)
     """
     think_id = config.think_token_id
     no_think_id = config.no_think_token_id
     default_idx = getattr(config, "default_routing_index", 0)
 
-    # 未配置任何控制 token → 直接返回默认值
+    # No control token configured -> return the default
     if think_id is None and no_think_id is None:
         return default_idx
 
-    # 在整个 batch 的 input_ids 中查找各控制 token 最后出现的位置
-    # （注意：当前假设 batch 内所有序列使用相同路由）
+    # Find the last position of each control token across the whole batch
+    # (all sequences in the batch are assumed to share the same route)
     last_think_pos = -1
     last_no_think_pos = -1
 
     if think_id is not None:
         think_mask = (input_ids == think_id)
         if think_mask.any():
-            # 找到最后一个 think_token 的位置（展平后的全局索引）
+            # Position of the last think token (index taken from the flattened nonzero result)
             last_think_pos = think_mask.nonzero()[-1, -1].item()
 
     if no_think_id is not None:
@@ -113,21 +114,21 @@ def _determine_routing_index(input_ids: torch.LongTensor, config: Qwen2PleConfig
         if no_think_mask.any():
             last_no_think_pos = no_think_mask.nonzero()[-1, -1].item()
 
-    # 两种控制 token 均未在 input_ids 中找到 → 使用默认值
+    # Neither control token found in input_ids -> use the default
     if last_think_pos == -1 and last_no_think_pos == -1:
         return default_idx
 
-    # 以最后出现的控制 token 为准
-    # 这样设计的安全性：如果用户在消息中注入了 /think，但系统模板在之后放置了 /no_think，
-    # 则 /no_think 的位置更靠后，会覆盖用户的注入
+    # The control token occurring last wins.
+    # Safety rationale: if a user injects /think in a message but the system template places
+    # /no_think afterwards, the later /no_think overrides the injection.
     if last_think_pos > last_no_think_pos:
-        return 1  # think 模式
+        return 1  # think mode
     else:
-        return 0  # no_think 模式
+        return 0  # no_think mode
 
 
 class Qwen2PleDecoderLayer(Qwen2DecoderLayer):
-    """Decoder 层：Attention 与 Qwen2 一致，MLP 替换为 Qwen2PleMLP，forward 透传 routing_index。"""
+    """Decoder layer: attention is identical to Qwen2, the MLP is replaced by Qwen2PleMLP, and forward passes routing_index through."""
 
     def __init__(self, config: Qwen2PleConfig, layer_idx: int):
         super().__init__(config=config, layer_idx=layer_idx)
@@ -167,17 +168,17 @@ class Qwen2PleDecoderLayer(Qwen2DecoderLayer):
 
 
 class Qwen2PleModel(Qwen2Model):
-    """骨干模型：在 forward 开头确定 routing_index，并透传给每一层的 MLP。
+    """Backbone model: determines routing_index at the start of forward and passes it to every layer's MLP.
 
-    routing_index 的来源（按优先级）：
-    1. kwargs 中显式传入的 routing_index（来自 generate 阶段的 prepare_inputs_for_generation 缓存，或用户手动指定）
-    2. 根据 input_ids 中的控制 token 自动计算（训练阶段）
-    3. 兜底使用 config.default_routing_index（默认 = 0 / no_think）
+    Sources of routing_index (by priority):
+    1. routing_index passed explicitly in kwargs (cached by prepare_inputs_for_generation during generate, or set by the user)
+    2. Computed from the control tokens in input_ids (training)
+    3. Fallback to config.default_routing_index (default = 0 / no_think)
     """
 
     def __init__(self, config: Qwen2PleConfig):
         super().__init__(config)
-        # 将父类创建的 Qwen2DecoderLayer 替换为 Qwen2PleDecoderLayer（双专家 MLP + routing_index）
+        # Replace the Qwen2DecoderLayer created by the parent class with Qwen2PleDecoderLayer (two-expert MLP + routing_index)
         self.layers = nn.ModuleList(
             [Qwen2PleDecoderLayer(config, layer_idx=i) for i in range(config.num_hidden_layers)]
         )
@@ -194,20 +195,20 @@ class Qwen2PleModel(Qwen2Model):
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> BaseModelOutputWithPast:
-        # ===== 路由决策 =====
-        # 优先级 1：从 kwargs 中取出已缓存的 routing_index
-        #   - generate 阶段：由 Qwen2PleForCausalLM.prepare_inputs_for_generation 在首步计算并缓存
-        #   - 用户也可以手动传入 routing_index=0/1 来强制路由
+        # ===== Routing decision =====
+        # Priority 1: routing_index taken from kwargs
+        #   - generate: computed and cached on the first step by Qwen2PleForCausalLM.prepare_inputs_for_generation
+        #   - the user can also pass routing_index=0/1 to force a route
         routing_index = kwargs.pop("routing_index", None)
 
-        # 优先级 2：从 input_ids 中的控制 token 自动计算
-        #   - 训练阶段：每次 forward 都会走到这里，因为训练时不经过 prepare_inputs_for_generation
-        #   - generate 首步：如果 prepare_inputs_for_generation 未设置，也会走到这里
+        # Priority 2: computed from the control tokens in input_ids
+        #   - training: every forward reaches this, since training does not go through prepare_inputs_for_generation
+        #   - first generate step: also reached if prepare_inputs_for_generation did not set it
         if routing_index is None and input_ids is not None:
             routing_index = _determine_routing_index(input_ids, self.config)
 
-        # 优先级 3：兜底默认值
-        #   - 仅在 input_ids 为 None（只传了 inputs_embeds）且未显式指定 routing_index 时触发
+        # Priority 3: fallback default
+        #   - only when input_ids is None (only inputs_embeds given) and routing_index is not specified
         if routing_index is None:
             routing_index = getattr(self.config, "default_routing_index", 0)
 
@@ -267,18 +268,18 @@ class Qwen2PleModel(Qwen2Model):
 
 
 class Qwen2PleForCausalLM(Qwen2ForCausalLM):
-    """Causal LM 顶层：使用 Qwen2PleModel 作为 backbone。
+    """Top-level causal LM using Qwen2PleModel as the backbone.
 
-    重写 prepare_inputs_for_generation 以在 generate 阶段正确传递路由决策：
-    - 若用户通过 generate(routing_index=N) 显式指定了路由，则始终使用该值
-    - 若未显式指定，则从 input_ids 中的控制 token 自动检测
-    - 结果缓存到 self._cached_routing_index 供调试/测试检查
+    Overrides prepare_inputs_for_generation to pass the routing decision correctly during generate:
+    - if the user sets a route via generate(routing_index=N), that value is always used
+    - otherwise it is detected from the control tokens in input_ids
+    - the result is cached in self._cached_routing_index for debugging/testing
     """
 
     def __init__(self, config: Qwen2PleConfig):
         super().__init__(config)
         self.model = Qwen2PleModel(config)
-        # 缓存 generate 过程中的 routing_index，避免后续步骤丢失路由信息
+        # Cache the routing_index during generate so later steps do not lose the route
         self._cached_routing_index = None
 
     def prepare_inputs_for_generation(
@@ -291,29 +292,29 @@ class Qwen2PleForCausalLM(Qwen2ForCausalLM):
         routing_index=None,
         **kwargs,
     ):
-        """重写以在 generate 阶段正确传递路由决策。
+        """Overridden to pass the routing decision correctly during generate.
 
-        路由优先级：
-        1. 用户通过 generate(routing_index=N) 显式传入 → 直接使用，不做自动检测
-        2. 未传入（routing_index=None）→ 从 input_ids 中的控制 token 自动检测
-        3. 自动检测也未命中 → 使用 config.default_routing_index
+        Routing priority:
+        1. Passed explicitly via generate(routing_index=N) -> used directly, no auto-detection
+        2. Not passed (routing_index=None) -> detected from the control tokens in input_ids
+        3. Auto-detection finds nothing -> config.default_routing_index
 
-        关键事实：在 generate 的自回归循环中，传入此方法的 input_ids 始终是
-        **完整的累积序列**（原始 prompt + 已生成的 token），而非只有新 token。
-        裁剪发生在父类方法内部（cache_dependant_input_preparation）。
+        Key fact: in generate's autoregressive loop, the input_ids passed to this method are always
+        the **full accumulated sequence** (original prompt + generated tokens), not just the new token.
+        Trimming happens inside the parent method (cache_dependant_input_preparation).
 
-        注意：routing_index 参数在 generate 循环中会通过 model_kwargs 持续传递，
-        所以用户在首步传入的值会自动保留到后续所有步骤。
+        Note: the routing_index argument keeps being passed through model_kwargs in the generate loop,
+        so a value passed on the first step is retained for all later steps.
         """
-        # 路由决策：优先使用用户显式传入的值，否则自动检测
+        # Routing decision: prefer the value passed explicitly by the user, otherwise auto-detect
         if routing_index is not None:
-            # 用户通过 generate(routing_index=N) 显式指定
+            # Set explicitly via generate(routing_index=N)
             self._cached_routing_index = routing_index
         else:
-            # 从完整 input_ids 中自动检测控制 token
+            # Auto-detect the control token from the full input_ids
             self._cached_routing_index = _determine_routing_index(input_ids, self.config)
 
-        # 调用父类的 prepare_inputs_for_generation 获取标准 model_inputs
+        # Call the parent prepare_inputs_for_generation to get the standard model_inputs
         model_inputs = super().prepare_inputs_for_generation(
             input_ids,
             past_key_values=past_key_values,
@@ -323,7 +324,7 @@ class Qwen2PleForCausalLM(Qwen2ForCausalLM):
             **kwargs,
         )
 
-        # 注入 routing_index，使其透传到 Qwen2PleModel.forward 的 kwargs 中
+        # Inject routing_index so it reaches the kwargs of Qwen2PleModel.forward
         model_inputs["routing_index"] = self._cached_routing_index
         return model_inputs
 

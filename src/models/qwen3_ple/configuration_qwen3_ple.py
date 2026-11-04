@@ -20,31 +20,31 @@ logger = logging.get_logger(__name__)
 
 class Qwen3PLEConfig(Qwen3Config):
     r"""
-    Path-Lock Expert 配置类，继承自 Qwen3Config。
+    Path-Lock Expert config class, extending Qwen3Config.
 
-    路由检测设计要点：
-    - 移除 `think_token_id` / `no_think_token_id`：新路由检测基于 tokenizer.decode + regex
-      字符串匹配，不再依赖单 token id 注册
-    - 新增 `strict_routing_match`：safe-mode 开关，控制 NO_MATCH 时的行为
-    - `default_routing_index` 沿用，作为非严格模式下的 fallback
+    Routing detection design:
+    - There are no `think_token_id` / `no_think_token_id`: detection is based on
+      tokenizer.decode + regex string matching, not on registered single token ids.
+    - `strict_routing_match` is a safe-mode switch controlling behaviour on NO_MATCH.
+    - `default_routing_index` is the fallback in non-strict mode.
 
-    路由决策（在 modeling 中实现）：
-    1. 定位最后一个 `<|im_start|>assistant` 锚点（如果有）
-    2. scan_region = 锚点之前的 token（无锚点则整段）
-    3. tokenizer.decode(scan_region) → 字符串
-    4. regex `(?<!<)/no_think(?!\w)|(?<!<)/think(?!\w)` findall，取最后一个匹配
-       - negative lookbehind `(?<!<)` 排除 `</think>` 闭合标签
-       - negative lookahead `(?!\w)` 防 `/think_hard` 类子串误触发
-    5. NO_MATCH 时由 `strict_routing_match` 控制行为
+    Routing decision (implemented in the modeling file):
+    1. Locate the last `<|im_start|>assistant` anchor (if any).
+    2. scan_region = tokens before the anchor (the whole sequence if there is no anchor).
+    3. tokenizer.decode(scan_region) -> string.
+    4. regex `(?<!<)/no_think(?!\w)|(?<!<)/think(?!\w)` findall; take the last match.
+       - negative lookbehind `(?<!<)` excludes the closing tag `</think>`
+       - negative lookahead `(?!\w)` avoids false hits on substrings like `/think_hard`
+    5. On NO_MATCH, `strict_routing_match` decides the behaviour.
 
     Args:
         strict_routing_match (`bool`, *optional*, defaults to `True`):
-            safe-mode 开关。`True` 时 NO_MATCH 抛 `ValueError`（fail-fast，防 V2 灾难重演）；
-            `False` 时退 `default_routing_index` 并 log warning（推理容错用）。
+            Safe-mode switch. If `True`, NO_MATCH raises `ValueError` (fail-fast);
+            if `False`, fall back to `default_routing_index` and log a warning (inference tolerance).
         default_routing_index (`int`, *optional*, defaults to 0):
-            NO_MATCH 时（仅在 `strict_routing_match=False` 下）使用的默认路由。
+            Default route used on NO_MATCH (only when `strict_routing_match=False`).
         **kwargs:
-            其余参数透传给 `Qwen3Config`。
+            Remaining arguments are passed to `Qwen3Config`.
     """
 
     model_type = "qwen3_ple"

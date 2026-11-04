@@ -1,7 +1,5 @@
 ### model
-# Track A2 Stage 2: PLE hybrid SFT (superior_reasoning 27k+27k)
-# 前置: Stage 1 instruct SFT 完成后，将产出模型转为 PLE
-# NOTE:----------Double check this one!----------
+# Prerequisite: the instruct-SFT output has been converted to PLE
 model_name_or_path: ./models/qwen3_4b_base_instruct_ple_initialized
 trust_remote_code: true
 
@@ -16,31 +14,25 @@ deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
 gradient_checkpointing: true
 
 ### dataset
-# NOTE:----------Double check this one!----------
 dataset_dir: train/data
 dataset: superior_reasoning_27k_27k
-# NOTE:----------Double check this one!----------
 template: qwen3
 cutoff_len: 32768
 max_samples: 100000000
 overwrite_cache: true
 preprocessing_num_workers: 16
 dataloader_num_workers: 2
-# NOTE:----------Double check this one!----------
 default_system: ""
 
 
 ### output
-# NOTE:----------Double check this one!----------
 output_dir: train/saves/qwen3_4b_base_instruct_stage2_superior_27k_27k
 save_only_model: true
 logging_steps: 1
-# NOTE:----------Double check this one!----------
 save_steps: 5000
 plot_loss: true
 overwrite_output_dir: false
 report_to: wandb
-# NOTE:----------Double check this one!----------
 run_name: Qwen3-4B-Base-Instruct-PLE-Stage2_superior_27k_27k
 
 ### train

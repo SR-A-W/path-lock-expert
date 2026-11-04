@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Qwen3 PLE 诊断脚本：不使用量化，直接对比 bf16 加载的输出。
+"""Qwen3 PLE diagnostic script: compare outputs of bf16-loaded models (no quantization).
 
-用于排查 PLE vs 源模型输出不一致的问题。
+Used to investigate output mismatches between the PLE model and the source model.
 """
 
 import sys

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-评估结果提取脚本：将 evalscope 结果目录中分散的数据整合为标准化 JSON。
+Result extraction script: consolidates the data scattered across an evalscope result directory into a standardized JSON.
 
-从 evalscope 的 predictions、reports、reviews 中提取：
-- accuracy（从 report）
-- avg_output_length（从 predictions 直接计算）
-- reflective_token_stats（从 predictions 直接计算，避免 report 中多 subset 覆写问题）
-- per_sample_data（对齐 predictions 和 reviews）
+Extracted from evalscope's predictions, reports and reviews:
+- accuracy (from the report)
+- avg_output_length (computed directly from predictions)
+- reflective_token_stats (computed directly from predictions, which avoids the report overwriting multiple subsets)
+- per_sample_data (predictions and reviews aligned)
 
 Usage:
     python eval/scripts/extract_results.py \
@@ -14,7 +14,7 @@ Usage:
       --config eval/scripts/model_configs/qwen_pl_moe_140k.yaml \
       --output-dir eval/results_json
 
-    # 或用 CLI 参数代替 config:
+    # Or use CLI arguments instead of a config:
     python eval/scripts/extract_results.py \
       --result-dir eval/results/pl_moe/qwen_pl_moe_140k \
       --model-name qwen_pl_moe_140k \
@@ -35,9 +35,9 @@ from typing import Any, Optional
 
 import yaml
 
-# ── 常量 ──────────────────────────────────────────────────────────────────────
+# ── Constants ──────────────────────────────────────────────────────────────────────
 
-# 目录名 → 标准化 key
+# Directory name -> standardized key
 BENCHMARK_DIR_TO_KEY = {
     "math500": "math500",
     "aime24": "aime24",
@@ -45,7 +45,7 @@ BENCHMARK_DIR_TO_KEY = {
     "gpqa_diamond": "gpqa_diamond",
 }
 
-# 标准化 key → report 文件 stem（不含 .json）
+# Standardized key -> report file stem (without .json)
 BENCHMARK_REPORT_NAMES = {
     "math500": "math_500",
     "aime24": "aime24",
@@ -57,7 +57,7 @@ MODES = ["think", "no_think"]
 
 REFLECTIVE_TOKENS = ["wait, ", "hmm", "okay", "alternatively", "let me think"]
 
-# ── 工具函数（复用自现有脚本的逻辑） ──────────────────────────────────────────
+# ── Helper functions ──────────────────────────────────────────
 
 
 def normalize_text(text: str) -> str:
@@ -66,7 +66,7 @@ def normalize_text(text: str) -> str:
 
 
 def count_reflective_tokens(text: str, tokens: list[str] | None = None) -> dict[str, int]:
-    """统计文本中 reflective tokens 的出现次数。"""
+    """Count occurrences of reflective tokens in the text."""
     if tokens is None:
         tokens = REFLECTIVE_TOKENS
     normalized = normalize_text(text)
@@ -78,9 +78,9 @@ def count_reflective_tokens(text: str, tokens: list[str] | None = None) -> dict[
 
 
 def extract_content(record: dict) -> str | None:
-    """从 evalscope prediction 记录中提取模型输出文本。"""
+    """Extract the model output text from an evalscope prediction record."""
     model_output = record.get("model_output") or {}
-    # 尝试 choices[0].message.content
+    # Try choices[0].message.content
     choices = model_output.get("choices") or []
     if choices:
         msg = choices[0].get("message") or {}
@@ -95,7 +95,7 @@ def extract_content(record: dict) -> str | None:
             joined = " ".join(parts).strip()
             if joined:
                 return joined
-    # 尝试 messages[0].content
+    # Try messages[0].content
     messages = model_output.get("messages") or []
     if messages:
         content = messages[0].get("content")
@@ -105,7 +105,7 @@ def extract_content(record: dict) -> str | None:
 
 
 def get_output_length(record: dict) -> int:
-    """获取单条记录的 output token 数（优先 usage.output_tokens，回退为字符数）。"""
+    """Get the number of output tokens of one record (prefers usage.output_tokens, falls back to the character count)."""
     try:
         usage = (record.get("model_output") or {}).get("usage")
         if usage and usage.get("output_tokens") is not None:
@@ -116,11 +116,11 @@ def get_output_length(record: dict) -> int:
     return len(content)
 
 
-# ── 目录探测 ──────────────────────────────────────────────────────────────────
+# ── Directory detection ──────────────────────────────────────────────────────────────────
 
 
 def find_latest_complete_run(benchmark_dir: Path, mode: str) -> Path | None:
-    """在 benchmark_dir/mode/ 下找到最新的含 reports/ 的 timestamp 目录。"""
+    """Find the latest timestamp directory containing reports/ under benchmark_dir/mode/."""
     mode_dir = benchmark_dir / mode
     if not mode_dir.is_dir():
         return None
@@ -130,13 +130,13 @@ def find_latest_complete_run(benchmark_dir: Path, mode: str) -> Path | None:
             candidates.append(d)
     if not candidates:
         return None
-    # timestamp 目录名格式: YYYYMMDD_HHMMSS，字典序即时间序
+    # Timestamp directory names look like YYYYMMDD_HHMMSS, so lexicographic order is chronological order
     candidates.sort(key=lambda p: p.name, reverse=True)
     return candidates[0]
 
 
 def auto_detect_model_id(run_dir: Path) -> str | None:
-    """自动检测 predictions/ 下的 model_id 子目录名。"""
+    """Auto-detect the model_id subdirectory name under predictions/."""
     pred_root = run_dir / "predictions"
     if not pred_root.is_dir():
         return None
@@ -144,26 +144,26 @@ def auto_detect_model_id(run_dir: Path) -> str | None:
     if len(subdirs) == 1:
         return subdirs[0].name
     if len(subdirs) > 1:
-        warnings.warn(f"predictions/ 下有多个子目录: {[d.name for d in subdirs]}，使用第一个")
+        warnings.warn(f"Multiple subdirectories under predictions/: {[d.name for d in subdirs]}; using the first one")
         return subdirs[0].name
     return None
 
 
-# ── 数据提取 ──────────────────────────────────────────────────────────────────
+# ── Data extraction ──────────────────────────────────────────────────────────────────
 
 
 def load_report(run_dir: Path, model_id: str, report_stem: str) -> dict | None:
-    """加载 report JSON 文件。"""
+    """Load the report JSON file."""
     report_path = run_dir / "reports" / model_id / f"{report_stem}.json"
     if not report_path.is_file():
-        # 尝试在 reports/model_id/ 下找任意 .json
+        # Try to find any .json under reports/model_id/
         reports_dir = run_dir / "reports" / model_id
         if reports_dir.is_dir():
             json_files = list(reports_dir.glob("*.json"))
             if len(json_files) == 1:
                 report_path = json_files[0]
             else:
-                warnings.warn(f"无法匹配 report: {report_path}，目录下有 {[f.name for f in json_files]}")
+                warnings.warn(f"Cannot match report: {report_path}; the directory contains {[f.name for f in json_files]}")
                 return None
         else:
             return None
@@ -172,17 +172,17 @@ def load_report(run_dir: Path, model_id: str, report_stem: str) -> dict | None:
 
 
 def extract_accuracy(report: dict) -> float | None:
-    """从 report 中提取 overall accuracy。"""
+    """Extract the overall accuracy from the report."""
     return report.get("score")
 
 
 def extract_accuracy_by_subset(report: dict) -> dict[str, float]:
-    """从 report 中提取 per-subset accuracy。"""
+    """Extract the per-subset accuracy from the report."""
     subsets = {}
     metrics = report.get("metrics") or []
     if not metrics:
         return subsets
-    # 取第一个 metric（通常是 mean_acc）
+    # Take the first metric (usually mean_acc)
     first_metric = metrics[0]
     categories = first_metric.get("categories") or []
     for cat in categories:
@@ -196,19 +196,19 @@ def compute_stats_from_predictions(
     report_stem: str,
 ) -> tuple[list[int], dict[str, Any]]:
     """
-    从 predictions 目录直接计算 output_length 和 reflective_token_stats。
-    返回 (all_lengths, reflective_stats_dict)。
+    Compute output_length and reflective_token_stats directly from the predictions directory.
+    Returns (all_lengths, reflective_stats_dict).
     """
     all_lengths: list[int] = []
     total_token_counts: dict[str, int] = defaultdict(int)
     total_reflective_per_response: list[int] = []
     total_responses = 0
 
-    # 收集匹配 report_stem 的所有 prediction 文件
+    # Collect all prediction files matching report_stem
     pred_files = []
     for p in pred_dir.glob("*.jsonl"):
         stem = p.stem
-        # 匹配规则: stem == report_stem 或 stem 以 report_stem_ 开头
+        # Matching rule: stem == report_stem, or stem starts with report_stem_
         if stem == report_stem or stem.startswith(report_stem + "_"):
             pred_files.append(p)
 
@@ -233,7 +233,7 @@ def compute_stats_from_predictions(
                         total_token_counts[token] += count
                     total_reflective_per_response.append(sum(counts.values()))
 
-    # 汇总 reflective stats
+    # Aggregate reflective stats
     avg_reflective = (
         sum(total_reflective_per_response) / len(total_reflective_per_response)
         if total_reflective_per_response else 0.0
@@ -243,7 +243,7 @@ def compute_stats_from_predictions(
         avg_per_token[token] = (
             total_token_counts[token] / total_responses if total_responses > 0 else 0.0
         )
-    # 计算有 reflective token 的样本比例
+    # Fraction of samples containing reflective tokens
     samples_with = sum(1 for c in total_reflective_per_response if c > 0)
     frac_with = samples_with / len(total_reflective_per_response) if total_reflective_per_response else 0.0
 
@@ -264,8 +264,8 @@ def extract_per_sample_data(
     report_stem: str,
 ) -> list[dict]:
     """
-    对齐 predictions 和 reviews，提取 per-sample 数据。
-    返回 [{"output_length": int, "correct": bool, "reflective_count": int}, ...]
+    Align predictions and reviews and extract per-sample data.
+    Returns [{"output_length": int, "correct": bool, "reflective_count": int}, ...]
     """
     samples = []
 
@@ -275,9 +275,9 @@ def extract_per_sample_data(
     ])
 
     for pred_file in pred_files:
-        # 对应的 review 文件名相同
+        # The corresponding review file has the same name
         review_file = review_dir / pred_file.name
-        # 读取 predictions
+        # Read predictions
         pred_records = []
         with open(pred_file, "r", encoding="utf-8") as f:
             for line in f:
@@ -289,7 +289,7 @@ def extract_per_sample_data(
                 except json.JSONDecodeError:
                     continue
 
-        # 读取 reviews（如果存在）
+        # Read reviews (if present)
         review_records = []
         if review_file.is_file():
             with open(review_file, "r", encoding="utf-8") as f:
@@ -302,7 +302,7 @@ def extract_per_sample_data(
                     except json.JSONDecodeError:
                         continue
 
-        # 按行对齐
+        # Align line by line
         for i, pred in enumerate(pred_records):
             output_length = get_output_length(pred)
             content = extract_content(pred)
@@ -325,7 +325,7 @@ def extract_per_sample_data(
     return samples
 
 
-# ── 主流程 ────────────────────────────────────────────────────────────────────
+# ── Main flow ────────────────────────────────────────────────────────────────────
 
 
 def process_model(
@@ -336,7 +336,7 @@ def process_model(
     dataset: str,
     include_per_sample: bool = True,
 ) -> dict:
-    """处理单个模型的所有 benchmark 结果，返回标准化 JSON 字典。"""
+    """Process all benchmark results of a single model and return a standardized JSON dict."""
     output = {
         "model": model_name,
         "model_display_name": display_name,
@@ -351,7 +351,7 @@ def process_model(
     for bench_dir_name, bench_key in BENCHMARK_DIR_TO_KEY.items():
         bench_dir = result_dir / bench_dir_name
         if not bench_dir.is_dir():
-            warnings.warn(f"Benchmark 目录不存在: {bench_dir}")
+            warnings.warn(f"Benchmark directory does not exist: {bench_dir}")
             continue
 
         report_stem = BENCHMARK_REPORT_NAMES[bench_key]
@@ -362,10 +362,10 @@ def process_model(
         for mode in MODES:
             run_dir = find_latest_complete_run(bench_dir, mode)
             if run_dir is None:
-                warnings.warn(f"无完整 run: {bench_dir}/{mode}/")
+                warnings.warn(f"No complete run: {bench_dir}/{mode}/")
                 continue
 
-            # 记录 eval_date（取最新 run 的 timestamp）
+            # Record eval_date (timestamp of the latest run)
             try:
                 ts = run_dir.name  # e.g. "20260212_004651"
                 dt = datetime.strptime(ts, "%Y%m%d_%H%M%S")
@@ -377,18 +377,18 @@ def process_model(
 
             model_id = auto_detect_model_id(run_dir)
             if model_id is None:
-                warnings.warn(f"无法检测 model_id: {run_dir}")
+                warnings.warn(f"Cannot detect model_id: {run_dir}")
                 continue
 
             pred_dir = run_dir / "predictions" / model_id
             review_dir = run_dir / "reviews" / model_id
 
-            # 加载 report 获取 accuracy
+            # Load the report to get accuracy
             report = load_report(run_dir, model_id, report_stem)
             accuracy = extract_accuracy(report) if report else None
             accuracy_by_subset = extract_accuracy_by_subset(report) if report else {}
 
-            # 直接从 predictions 计算 output_length 和 reflective stats
+            # Compute output_length and reflective stats directly from predictions
             all_lengths, reflective_stats = compute_stats_from_predictions(pred_dir, report_stem)
             avg_output_length = (
                 round(sum(all_lengths) / len(all_lengths), 2) if all_lengths else None
@@ -418,15 +418,15 @@ def process_model(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="将 evalscope 结果提取为标准化 JSON"
+        description="Extract evalscope results into a standardized JSON"
     )
     parser.add_argument(
         "--result-dir", type=Path, required=True,
-        help="evalscope 结果根目录（如 eval/results/pl_moe/qwen_pl_moe_140k）",
+        help="evalscope result root directory (e.g. eval/results/pl_moe/qwen_pl_moe_140k)",
     )
     parser.add_argument(
         "--config", type=Path, default=None,
-        help="模型元数据 YAML 配置文件",
+        help="Model metadata YAML config file",
     )
     parser.add_argument("--model-name", type=str, default=None)
     parser.add_argument("--display-name", type=str, default=None)
@@ -434,15 +434,15 @@ def main():
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument(
         "--output-dir", type=Path, default=Path("eval/results_json"),
-        help="输出目录（默认 eval/results_json）",
+        help="Output directory (default eval/results_json)",
     )
     parser.add_argument(
         "--no-per-sample", action="store_true",
-        help="不包含 per_sample_data（减小文件体积）",
+        help="Do not include per_sample_data (reduces file size)",
     )
     args = parser.parse_args()
 
-    # 从 config 或 CLI 获取元数据
+    # Get metadata from the config or the CLI
     if args.config and args.config.is_file():
         with open(args.config, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
@@ -457,7 +457,7 @@ def main():
         dataset = args.dataset
 
     if not model_name:
-        # 从 result-dir 名推断
+        # Infer from the result-dir name
         model_name = args.result_dir.name
     if not display_name:
         display_name = model_name
@@ -468,10 +468,10 @@ def main():
 
     result_dir = args.result_dir.resolve()
     if not result_dir.is_dir():
-        raise SystemExit(f"结果目录不存在: {result_dir}")
+        raise SystemExit(f"Result directory does not exist: {result_dir}")
 
-    print(f"提取模型: {model_name}")
-    print(f"结果目录: {result_dir}")
+    print(f"Extracting model: {model_name}")
+    print(f"Result directory: {result_dir}")
 
     output = process_model(
         result_dir=result_dir,
@@ -482,13 +482,13 @@ def main():
         include_per_sample=not args.no_per_sample,
     )
 
-    # 写入 JSON
+    # Write JSON
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output_path = args.output_dir / f"{model_name}.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
-    print(f"\n已写入: {output_path}")
+    print(f"\nWritten: {output_path}")
 
 
 if __name__ == "__main__":

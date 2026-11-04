@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""临时脚本：用真实 tokenizer 统计数据集 token 长度分布"""
+"""Compute the token-length distribution of the datasets with the real tokenizer"""
 from transformers import AutoTokenizer
 import json, random, sys
 
@@ -44,21 +44,21 @@ for cutoff in [16384, 32768]:
     ne = int(nr * len(nothink_items))
     total = len(think_items) + len(nothink_items)
     print(f"\n=== cutoff = {cutoff} tokens ===")
-    print(f"/think: 超长 {tt}/{len(think_items)} ({tt/len(think_items)*100:.1f}%)")
-    print(f"/no_think: 超长 ~{ne}/{len(nothink_items)} ({nr*100:.1f}%)")
-    print(f"有毒: ~{tt+ne}/{total} ({(tt+ne)/total*100:.1f}%)")
+    print(f"/think: too long {tt}/{len(think_items)} ({tt/len(think_items)*100:.1f}%)")
+    print(f"/no_think: too long ~{ne}/{len(nothink_items)} ({nr*100:.1f}%)")
+    print(f"Toxic: ~{tt+ne}/{total} ({(tt+ne)/total*100:.1f}%)")
 
 n = len(think_lengths)
-print(f"\n=== /think 分布 ===")
+print(f"\n=== /think distribution ===")
 for p in [50,75,80,85,90,95,99]:
     v = think_lengths[min(int(n*p/100),n-1)]
-    m = " !!超16k" if v>16384 else ""
-    m += " !!超32k" if v>32768 else ""
+    m = " !!>16k" if v>16384 else ""
+    m += " !!>32k" if v>32768 else ""
     print(f"  P{p}: {v:,}{m}")
 print(f"  Max: {think_lengths[-1]:,}")
 
 n2 = len(nothink_lengths)
-print(f"\n=== /no_think 分布 ===")
+print(f"\n=== /no_think distribution ===")
 for p in [50,75,90,95,99]:
     print(f"  P{p}: {nothink_lengths[min(int(n2*p/100),n2-1)]:,}")
 print(f"  Max: {nothink_lengths[-1]:,}")

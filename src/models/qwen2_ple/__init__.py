@@ -12,10 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Qwen2 Path-Lock Expert (PLE) 独立版本模块。
-
-import 路径已从相对路径修正为 pip 安装的 transformers 路径。
-"""
+"""Standalone Qwen2 Path-Lock Expert (PLE) module (imports use the pip-installed transformers)."""
 
 from .configuration_qwen2_ple import Qwen2PleConfig
 from .modeling_qwen2_ple import (

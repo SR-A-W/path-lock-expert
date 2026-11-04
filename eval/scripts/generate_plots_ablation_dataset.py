@@ -1,5 +1,5 @@
 """
-Ablation Study: Dataset comparison (tab:ablation_dataset_by_base_weight).
+Ablation Study: Dataset comparison.
 Each (model x benchmark x metric) saved as a standalone figure.
 X-axis grouped by mode (Think / No-think), bars represent datasets.
 Color by mode: blue=Think, green=No-think.
@@ -14,9 +14,9 @@ from matplotlib.patches import Patch
 from matplotlib.transforms import blended_transform_factory
 import os
 
-# ── 颜色方案 ──
-DEEP_BLUE  = "#1B3A5C"   # Think 色
-DEEP_GREEN = "#1B5E20"   # No-think 色
+# ── Color scheme ──
+DEEP_BLUE  = "#1B3A5C"   # Think color
+DEEP_GREEN = "#1B5E20"   # No-think color
 
 plt.rcParams.update({
     "font.family": "serif",
@@ -31,15 +31,15 @@ plt.rcParams.update({
     "hatch.linewidth": 1.5,
 })
 
-# ── 数据集样式: Superior=实心(主角), OpenR1=斜线(baseline) ──
+# ── Dataset style: Superior = solid fill (ours), OpenR1 = hatched (baseline) ──
 DATASETS = ["Superior", "OpenR1"]
 DATASET_STYLE = {
     "Superior": {"hatch": None,  "alpha": 1.00},
     "OpenR1":   {"hatch": "///", "alpha": 0.70},
 }
 
-# ── 数据: tab:ablation_dataset_by_base_weight ──
-# 结构: {model: {dataset: {benchmark: (think, nothink)}}}
+# ── Data: accuracy for each base model and dataset ──
+# Structure: {model: {dataset: {benchmark: (think, nothink)}}}
 
 DATA_ACC = {
     "Qwen3-4B": {
@@ -101,22 +101,22 @@ for metric_key, minfo in METRIC_INFO.items():
             gap_within = 0.12
             group_gap = 0.6
 
-            # Think 组 X 坐标
+            # X positions of the Think group
             think_xs = np.arange(n_ds) * (bw + gap_within)
             think_center = think_xs.mean()
 
-            # No-think 组 X 坐标
+            # X positions of the No-think group
             nothink_start = think_xs[-1] + bw + group_gap
             nothink_xs = nothink_start + np.arange(n_ds) * (bw + gap_within)
             nothink_center = nothink_xs.mean()
 
-            # 收集数据
+            # Collect data
             think_vals = [DATA[model][ds][bm][0] for ds in DATASETS]
             nothink_vals = [DATA[model][ds][bm][1] for ds in DATASETS]
             all_v = [v for v in think_vals + nothink_vals if v is not None]
             ymax_data = max(all_v) if all_v else 100
 
-            # ── Y 轴设置 ──
+            # ── Y axis settings ──
             if metric_key == "refl":
                 ax.set_yscale("symlog", linthresh=0.01, linscale=0.5)
                 ymax = ymax_data * 8.0
@@ -142,7 +142,7 @@ for metric_key, minfo in METRIC_INFO.items():
                 disp = ax.transData.transform((0, val))
                 _, val_axes_y = ax.transAxes.inverted().transform(disp)
                 label_y = min(val_axes_y + 0.03, 0.93)
-                # 每组最右 bar 的标签右对齐, 防止溢出图边界
+                # Right-align the label of the rightmost bar in each group to avoid overflowing the figure edge
                 h_align = "right" if is_last_in_group else "center"
                 ax.text(x_pos, label_y, f"{val:{display_fmt}}", transform=trans_val,
                         ha=h_align, va="bottom", fontsize=fs, color="#222", fontweight="bold",
@@ -159,23 +159,23 @@ for metric_key, minfo in METRIC_INFO.items():
                     ax.text(x_pos, 0.02, "N/A", transform=trans_val,
                             ha="center", va="bottom", fontsize=10, color="#999", fontstyle="italic")
 
-            # ── 画 Think 组 (蓝色) ──
+            # ── Draw the Think group (blue) ──
             for i, ds in enumerate(DATASETS):
                 _draw_bar(think_xs[i], think_vals[i], DEEP_BLUE, ds,
                           is_last_in_group=(i == n_ds - 1))
 
-            # ── 画 No-think 组 (绿色) ──
+            # ── Draw the No-think group (green) ──
             for i, ds in enumerate(DATASETS):
                 _draw_bar(nothink_xs[i], nothink_vals[i], DEEP_GREEN, ds,
                           is_last_in_group=(i == n_ds - 1))
 
-            # ── X 轴标签 ──
+            # ── X axis labels ──
             all_xs = list(think_xs) + list(nothink_xs)
             all_labels = list(DATASETS) + list(DATASETS)
             ax.set_xticks(all_xs)
             ax.set_xticklabels(all_labels, fontsize=12, rotation=35, ha="right", rotation_mode="anchor")
 
-            # 分组标签
+            # Group labels
             trans = ax.get_xaxis_transform()
             ax.text(think_center, -0.22, "Think", transform=trans,
                     ha="center", va="top", fontsize=15, fontweight="bold", color="#2B4C7E")
@@ -187,7 +187,7 @@ for metric_key, minfo in METRIC_INFO.items():
             ax.set_axisbelow(True)
             ax.tick_params(axis="both", length=3, width=0.5)
 
-            # ── Legend (只在 refl 图中显示) ──
+            # ── Legend (shown only in refl plots) ──
             if metric_key == "refl":
                 legend_handles = [
                     Patch(fc=DEEP_BLUE, ec="w", label="Superior (Think)"),

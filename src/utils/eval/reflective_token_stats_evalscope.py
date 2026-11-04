@@ -2,8 +2,8 @@
 """
 Reflective Token Statistics Script for EvalScope Results
 
-统计 evalscope 框架运行的 evaluation 结果中的 reflective token 出现数量和频次，
-并将结果作为新字段写入对应的 reports 目录下的 json 文件中。
+Counts the occurrences and frequency of reflective tokens in the evaluation results produced by evalscope,
+and writes the result as a new field into the corresponding json file under the reports directory.
 
 Usage:
     python reflective_token_stats_evalscope.py --input_dir /path/to/eval/results
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 
-# 与原始脚本一致的 reflective tokens 列表
+# Reflective token list
 REFLECTIVE_TOKENS = [
     "wait, ", "hmm", "okay", "alternatively", "let me think"
 ]
@@ -41,7 +41,7 @@ def count_reflective_tokens(text: str, tokens: List[str]) -> Dict[str, int]:
 
 
 def _content_to_string(content: Any) -> Optional[str]:
-    """将 content 字段统一转为字符串（可能是 str 或 list of dict 如 [{"type":"...", "text":"..."}]）。"""
+    """Normalize the content field to a string (it may be a str or a list of dicts such as [{"type":"...", "text":"..."}])."""
     if content is None:
         return None
     if isinstance(content, str):
@@ -61,9 +61,9 @@ def _content_to_string(content: Any) -> Optional[str]:
 
 def extract_content_from_evalscope_record(record: Dict[str, Any]) -> Optional[str]:
     """
-    从 evalscope 单条 jsonl 记录中提取模型输出文本。
-    支持 model_output.choices[0].message.content 或 model_output.messages[0].content；
-    content 可为字符串或 list of dict（含 'text'/'content'）。
+    Extract the model output text from one evalscope jsonl record.
+    Supports model_output.choices[0].message.content or model_output.messages[0].content;
+    content may be a string or a list of dicts (with 'text'/'content').
     """
     model_output = record.get('model_output') or {}
     choices = model_output.get('choices') or []
@@ -87,10 +87,10 @@ def process_evalscope_jsonl(
     tokens: List[str],
 ) -> Dict[str, Any]:
     """
-    处理单个 evalscope 的 .jsonl 预测文件，统计 reflective tokens。
+    Process one evalscope .jsonl prediction file and count reflective tokens.
 
     Returns:
-        与原始脚本结构兼容的统计字典，用于写入 report。
+        a statistics dict compatible with the original script's structure, to be written into the report.
     """
     total_tokens = defaultdict(int)
     total_reflective_per_response = []
@@ -140,9 +140,9 @@ def find_report_path_for_predictions(
     prediction_stem: str,
 ) -> Optional[Path]:
     """
-    根据 predictions 下的 jsonl 文件名，找到对应的 report json 路径。
-    规则：reports/<model_id>/ 下存在 <report_base>.json，且 report_base 是 prediction_stem 的前缀。
-    若有多个匹配则取最长前缀对应的 report。
+    Find the matching report json path from a jsonl file name under predictions.
+    Rule: <report_base>.json exists under reports/<model_id>/ and report_base is a prefix of prediction_stem.
+    If several match, the report with the longest prefix is used.
     """
     reports_dir = run_dir / 'reports' / model_id
     if not reports_dir.is_dir():
@@ -162,9 +162,9 @@ def find_report_path_for_predictions(
 
 def find_evalscope_predictions_and_reports(root_dir: Path) -> List[Tuple[Path, Path]]:
     """
-    递归扫描 root_dir，找到所有 evalscope 的 predictions（*.jsonl），
-    并解析出对应的 report json 路径（若存在）。
-    目录结构约定: .../run/predictions/<model_id>/<bench>.jsonl 与 .../run/reports/<model_id>/<report>.json
+    Recursively scan root_dir for all evalscope predictions (*.jsonl)
+    and resolve the matching report json path (if it exists).
+    Directory layout: .../run/predictions/<model_id>/<bench>.jsonl and .../run/reports/<model_id>/<report>.json
     """
     root_dir = root_dir.resolve()
     pairs: List[Tuple[Path, Path]] = []
@@ -191,33 +191,33 @@ def find_evalscope_predictions_and_reports(root_dir: Path) -> List[Tuple[Path, P
 
 def main():
     parser = argparse.ArgumentParser(
-        description='统计 evalscope evaluation 结果中的 reflective tokens，并写入对应 reports 的 json'
+        description='Count reflective tokens in evalscope evaluation results and write them into the matching reports json'
     )
     parser.add_argument(
         '--input-dir', type=str, required=True,
-        help='根目录：将递归扫描其下所有 evalscope 的 predictions 与 reports',
+        help='Root directory: all evalscope predictions and reports below it are scanned recursively',
     )
     parser.add_argument(
         '--tokens', type=str, nargs='*', default=REFLECTIVE_TOKENS,
-        help='要统计的 reflective token 列表（默认使用内置列表）',
+        help='List of reflective tokens to count (default: built-in list)',
     )
     parser.add_argument(
         '--key', type=str, default='reflective_token_stats',
-        help='写入 report json 时使用的键名（默认: reflective_token_stats）',
+        help='Key name used when writing into the report json (default: reflective_token_stats)',
     )
     parser.add_argument(
         '--dry-run', action='store_true',
-        help='只打印将要处理的文件，不写入 report',
+        help='Only print the files that would be processed; do not write reports',
     )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
     if not input_dir.exists():
-        print(f"错误：目录不存在 {input_dir}")
+        print(f"Error: directory does not exist {input_dir}")
         return 1
 
     pairs = find_evalscope_predictions_and_reports(input_dir)
-    # 去重（同一 (pred, report) 可能被 rglob 重复）
+    # Deduplicate (the same (pred, report) pair may be returned repeatedly by rglob)
     seen = set()
     unique_pairs = []
     for p, r in pairs:
@@ -226,10 +226,10 @@ def main():
             seen.add(k)
             unique_pairs.append((p, r))
 
-    print(f"共找到 {len(unique_pairs)} 个 evalscope benchmark（predictions + 对应 report）")
+    print(f"Found {len(unique_pairs)} evalscope benchmarks (predictions + matching report)")
 
     if not unique_pairs:
-        print("未找到可处理的 predictions/report 对，请确认目录下存在 evalscope 的 predictions 与 reports 结构。")
+        print("No processable predictions/report pairs found; check that the directory has the evalscope predictions and reports layout.")
         return 0
 
     success = 0
@@ -239,7 +239,7 @@ def main():
         try:
             stats = process_evalscope_jsonl(pred_path, args.tokens)
         except Exception as e:
-            print(f"  处理失败: {e}")
+            print(f"  Processing failed: {e}")
             fail += 1
             continue
         if args.dry_run:
@@ -251,7 +251,7 @@ def main():
             with open(report_path, 'r', encoding='utf-8') as f:
                 report = json.load(f)
         except Exception as e:
-            print(f"  读取 report 失败: {e}")
+            print(f"  Failed to read report: {e}")
             fail += 1
             continue
         report[args.key] = stats
@@ -259,14 +259,14 @@ def main():
             with open(report_path, 'w', encoding='utf-8') as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"  写入 report 失败: {e}")
+            print(f"  Failed to write report: {e}")
             fail += 1
             continue
-        print(f"  已写入 {args.key}: total_responses={stats['total_responses']}, "
+        print(f"  Wrote {args.key}: total_responses={stats['total_responses']}, "
               f"avg_reflective={stats['avg_total_reflective_tokens_per_response']:.4f}")
         success += 1
 
-    print(f"\n完成: 成功 {success}, 失败 {fail}")
+    print(f"\nDone: {success} succeeded, {fail} failed")
     return 0
 
 

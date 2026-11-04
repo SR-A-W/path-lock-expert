@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""使用真实 tokenizer 过滤超长数据
+"""Filter over-long data with the real tokenizer
 
-对 chars > SAFE_CHARS_THRESHOLD 的候选数据逐条 tokenize，
-剔除超过 max_tokens 的样本。chars 低于阈值的直接保留（安全）。
+Candidates with chars > SAFE_CHARS_THRESHOLD are tokenized one by one,
+and samples exceeding max_tokens are dropped. Samples below the threshold are kept as-is (safe).
 
-使用多线程并行 tokenize 加速。
+Tokenization is parallelized across worker processes.
 
-使用方法:
-    conda activate gpt-oss
+Usage:
 
-    # 过滤单个文件
+    # Filter a single file
     python src/datasets/filter_by_token_length.py \
         --input train/data/superior_reasoning_27k_27k.jsonl \
         --output train/data/superior_reasoning_27k_27k_filtered.jsonl \
@@ -18,7 +17,7 @@
         --safe_chars 50000 \
         --workers 16
 
-    # 批量过滤多个文件
+    # Filter several files
     python src/datasets/filter_by_token_length.py \
         --input train/data/superior_reasoning_27k_27k.jsonl train/data/superior_hybrid_37k_37k.jsonl \
         --max_tokens 43008 \
@@ -34,13 +33,13 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-# 全局 tokenizer（每个 worker 进程延迟初始化）
+# Global tokenizer (lazily initialized in each worker process)
 _tokenizer = None
 _tokenizer_path = None
 
 
 def init_tokenizer(model_path):
-    """在每个 worker 进程中初始化 tokenizer"""
+    """Initialize the tokenizer in each worker process"""
     global _tokenizer, _tokenizer_path
     if _tokenizer is None or _tokenizer_path != model_path:
         from transformers import AutoTokenizer
@@ -49,55 +48,55 @@ def init_tokenizer(model_path):
 
 
 def count_tokens(text, model_path):
-    """计算单条文本的 token 数（在 worker 进程中执行）"""
+    """Count tokens of one text (runs in a worker process)"""
     init_tokenizer(model_path)
     return len(_tokenizer.encode(text, add_special_tokens=False))
 
 
 def process_candidate(args):
-    """处理一条候选数据，返回 (index, token_count)"""
+    """Process one candidate item, return (index, token_count)"""
     idx, text, model_path = args
     tok = count_tokens(text, model_path)
     return (idx, tok)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="使用真实 tokenizer 过滤超长数据")
+    parser = argparse.ArgumentParser(description="Filter over-long data with the real tokenizer")
     parser.add_argument(
         "--input", type=str, nargs="+", required=True,
-        help="输入 JSONL 文件路径（支持多个）",
+        help="Input JSONL file path(s) (multiple allowed)",
     )
     parser.add_argument(
         "--output_suffix", type=str, default="_filtered",
-        help="输出文件名后缀（默认: _filtered，即 xxx.jsonl → xxx_filtered.jsonl）",
+        help="Output file name suffix (default: _filtered, i.e. xxx.jsonl -> xxx_filtered.jsonl)",
     )
     parser.add_argument(
         "--inplace", action="store_true",
-        help="原地覆盖输入文件（不加后缀）",
+        help="Overwrite the input file in place (no suffix)",
     )
     parser.add_argument(
         "--max_tokens", type=int, default=43008,
-        help="最大 token 数阈值（默认: 43008）",
+        help="Maximum token threshold (default: 43008)",
     )
     parser.add_argument(
         "--safe_chars", type=int, default=50000,
-        help="安全字符数阈值，低于此值的直接保留不 tokenize（默认: 50000）",
+        help="Safe character threshold; items below it are kept without tokenizing (default: 50000)",
     )
     parser.add_argument(
         "--model_path", type=str,
         default="./models/source/Qwen/Qwen3-4B-Instruct-2507",
-        help="Tokenizer 模型路径",
+        help="Tokenizer model path",
     )
     parser.add_argument(
         "--workers", type=int, default=16,
-        help="并行 worker 数（默认: 16）",
+        help="Number of parallel workers (default: 16)",
     )
     args = parser.parse_args()
 
     for input_path in args.input:
         input_path = Path(input_path)
         if not input_path.exists():
-            print(f"ERROR: {input_path} 不存在")
+            print(f"ERROR: {input_path} does not exist")
             continue
 
         if args.inplace:
@@ -106,12 +105,12 @@ def main():
             output_path = input_path.parent / (input_path.stem + args.output_suffix + ".jsonl")
 
         print(f"\n{'='*60}")
-        print(f"过滤: {input_path}")
-        print(f"输出: {output_path}")
+        print(f"Filtering: {input_path}")
+        print(f"Output: {output_path}")
         print(f"max_tokens: {args.max_tokens}, safe_chars: {args.safe_chars}, workers: {args.workers}")
         print(f"{'='*60}")
 
-        # 1. 加载数据，分为安全和候选
+        # 1. Load data, split into safe items and candidates
         all_items = []
         safe_indices = []
         candidate_tasks = []
@@ -133,11 +132,11 @@ def main():
                     candidate_tasks.append((idx, u + a, args.model_path))
 
         total = len(all_items)
-        print(f"  总计: {total}")
-        print(f"  安全 (chars <= {args.safe_chars}): {len(safe_indices)}")
-        print(f"  候选 (需 tokenize): {len(candidate_tasks)}")
+        print(f"  Total: {total}")
+        print(f"  Safe (chars <= {args.safe_chars}): {len(safe_indices)}")
+        print(f"  Candidates (to tokenize): {len(candidate_tasks)}")
 
-        # 2. 多进程 tokenize 候选数据
+        # 2. Tokenize candidates in parallel
         print(f"  Tokenizing {len(candidate_tasks)} candidates with {args.workers} workers...")
         keep_set = set(safe_indices)
         removed = 0
@@ -159,10 +158,10 @@ def main():
                         elapsed = time.time() - start_time
                         print(f"    [{done}/{len(candidate_tasks)}] removed so far: {removed}, elapsed: {elapsed:.1f}s")
 
-        # 3. 写入结果
+        # 3. Write results
         kept_items = [all_items[i] for i in sorted(keep_set)]
 
-        # 如果 inplace，先写临时文件再替换
+        # If inplace, write a temporary file first and then replace
         if args.inplace:
             tmp_path = str(output_path) + ".tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
@@ -175,12 +174,12 @@ def main():
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
         elapsed = time.time() - start_time
-        print(f"\n  结果: {total} → {len(kept_items)} (剔除 {removed})")
-        print(f"  耗时: {elapsed:.1f}s")
+        print(f"\n  Result: {total} -> {len(kept_items)} (removed {removed})")
+        print(f"  Elapsed: {elapsed:.1f}s")
 
         if removed_details:
             removed_details.sort(key=lambda x: -x[1])
-            print(f"  被剔除的最长 5 条:")
+            print(f"  Longest 5 removed items:")
             for idx, tok in removed_details[:5]:
                 print(f"    index={idx}, tokens={tok}")
 

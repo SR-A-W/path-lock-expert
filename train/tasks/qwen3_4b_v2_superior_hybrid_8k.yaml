@@ -1,6 +1,5 @@
 ### model
-# Qwen3-4B PLE V2（多 token 路由，无注册特殊 token）+ superior_hybrid_8k
-# NOTE:----------Double check this one!----------
+# Qwen3-4B PLE with multi-token routing (no registered special tokens)
 model_name_or_path: ./models/qwen3_4b_ple_initialized
 trust_remote_code: true
 
@@ -15,31 +14,25 @@ deepspeed: train/LLaMA-Factory/examples/deepspeed/ds_z2_config.json
 gradient_checkpointing: true
 
 ### dataset
-# NOTE:----------Double check this one!----------
 dataset_dir: train/data
 dataset: superior_hybrid_8k
-# NOTE:----------Double check this one!----------
 template: qwen3
 cutoff_len: 32768
 max_samples: 100000000
 overwrite_cache: true
 preprocessing_num_workers: 16
 dataloader_num_workers: 2
-# NOTE:----------Double check this one!----------
 default_system: ""
 
 
 ### output
-# NOTE:----------Double check this one!----------
 output_dir: train/saves/qwen3_4b_v2_superior_hybrid_8k
 save_only_model: true
 logging_steps: 1
-# NOTE:----------Double check this one!----------
 save_steps: 5000
 plot_loss: true
 overwrite_output_dir: false
 report_to: wandb
-# NOTE:----------Double check this one!----------
 run_name: Qwen3-4B-PLE-V2_superior_hybrid_8k
 
 ### train

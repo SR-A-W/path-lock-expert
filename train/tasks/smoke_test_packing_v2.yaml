@@ -1,6 +1,6 @@
-### Smoke Test: packing=true (不带 neat_packing) 丢弃超长样本验证
-### 数据集: smoke_test_cutoff65k (2 条: 1 短 + 1 长 72K tokens)
-### 预期: cutoff_len=1024 时长样本被丢弃, 日志出现 "Dropped lengthy example"
+### Smoke Test: packing=true (without neat_packing), check that over-long samples are dropped
+### Dataset: smoke_test_cutoff65k (2 samples: 1 short + 1 long with 72K tokens)
+### Expected: with cutoff_len=1024, long samples are dropped and the log shows "Dropped lengthy example"
 
 ### model
 model_name_or_path: models/qwen3_4b_ple_initialized

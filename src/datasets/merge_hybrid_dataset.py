@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""合并 /think 和 /no_think 数据为最终训练集
+"""Merge /think and /no_think data into the final training set
 
-读取 prepare_think_data.py 产出的 think_data.jsonl 和
-filter_no_think_data.py 产出的 no_think_filtered.jsonl，
-按指定比例采样，输出最终训练用 JSONL。
+Reads think_data.jsonl (from prepare_think_data.py) and
+no_think_filtered.jsonl (from filter_no_think_data.py),
+samples them at the given ratio and writes the final training JSONL.
 
-不做随机打乱（LLaMA-Factory 的 RandomSampler 会自动处理）。
+No shuffling is done (LLaMA-Factory's RandomSampler handles it).
 
-支持一次生成多个比例变体（如 1:1, 1:2, 2:1）。
+Several ratio variants (e.g. 1:1, 1:2, 2:1) can be generated in one run.
 
-输出到 datasets/superior_reasoning/final/，用户手动复制到 train/data/ 并注册。
+Output goes to datasets/superior_reasoning/final/; copy it to train/data/ and register it manually.
 
-使用方法:
-    conda activate het
+Usage:
     python -m src.datasets.merge_hybrid_dataset \
         --think_input datasets/superior_reasoning/think_data.jsonl \
         --no_think_input datasets/superior_reasoning/no_think_filtered.jsonl \
         --output_dir datasets/superior_reasoning/final \
         --ratios 1:1,1:2,2:1
 
-依赖:
-    无额外依赖（仅标准库）
+Dependencies:
+    None beyond the standard library
 """
 
 import argparse
@@ -30,15 +29,15 @@ import random
 import sys
 from pathlib import Path
 
-# 项目根目录
+# Project root directory
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 
-# ==================== 工具函数 ====================
+# ==================== Helper functions ====================
 
 def load_jsonl(path: str) -> list:
-    """加载 JSONL 文件"""
+    """Load a JSONL file"""
     data = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -49,35 +48,35 @@ def load_jsonl(path: str) -> list:
 
 
 def write_jsonl(data: list, path: str):
-    """写入 JSONL 文件"""
+    """Write a JSONL file"""
     with open(path, "w", encoding="utf-8") as f:
         for item in data:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
 def parse_ratio(ratio_str: str) -> tuple[int, int]:
-    """解析比例字符串（如 '1:2' → (1, 2)）"""
+    """Parse a ratio string (e.g. '1:2' -> (1, 2))"""
     parts = ratio_str.strip().split(":")
     if len(parts) != 2:
-        raise ValueError(f"无效比例格式: {ratio_str}，应为 'X:Y'")
+        raise ValueError(f"Invalid ratio format: {ratio_str}; expected 'X:Y'")
     return int(parts[0]), int(parts[1])
 
 
 def compute_counts(
     n_think: int, n_no_think: int, ratio_think: int, ratio_no_think: int
 ) -> tuple[int, int]:
-    """根据比例和可用数据量计算实际采样数
+    """Compute the actual sample counts from the ratio and the available data
 
-    以数据量较少的一方为瓶颈，按比例缩放另一方。
+    The side with less data is the bottleneck; the other side is scaled by the ratio.
 
     Args:
-        n_think: 可用 think 样本数
-        n_no_think: 可用 no_think 样本数
-        ratio_think: think 比例系数
-        ratio_no_think: no_think 比例系数
+        n_think: number of available think samples
+        n_no_think: number of available no_think samples
+        ratio_think: think ratio coefficient
+        ratio_no_think: no_think ratio coefficient
 
     Returns:
-        (think_count, no_think_count) 实际采样数
+        (think_count, no_think_count) actual sample counts
     """
     per_unit_think = n_think / ratio_think
     per_unit_no_think = n_no_think / ratio_no_think
@@ -89,7 +88,7 @@ def compute_counts(
     return think_count, no_think_count
 
 
-# dataset_info.json 注册模板
+# dataset_info.json registration template
 DATASET_INFO_TEMPLATE = {
     "formatting": "sharegpt",
     "columns": {"messages": "conversations", "system": None},
@@ -102,39 +101,39 @@ DATASET_INFO_TEMPLATE = {
 }
 
 
-# ==================== 主流程 ====================
+# ==================== Main ====================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="合并 /think 和 /no_think 数据为最终训练集"
+        description="Merge /think and /no_think data into the final training set"
     )
     parser.add_argument(
         "--think_input", type=str,
         default="datasets/superior_reasoning/think_data.jsonl",
-        help="think 数据路径",
+        help="Path to the think data",
     )
     parser.add_argument(
         "--no_think_input", type=str,
         default="datasets/superior_reasoning/no_think_filtered.jsonl",
-        help="no_think 数据路径",
+        help="Path to the no_think data",
     )
     parser.add_argument(
         "--output_dir", type=str, default="datasets/superior_reasoning/final",
-        help="输出目录",
+        help="Output directory",
     )
     parser.add_argument(
         "--output_name", type=str, default="superior_reasoning",
-        help="输出文件名前缀",
+        help="Output file name prefix",
     )
     parser.add_argument(
         "--ratios", type=str, default="1:1",
-        help="think:no_think 比例，逗号分隔多个（如 1:1,1:2,2:1）",
+        help="think:no_think ratios, comma-separated (e.g. 1:1,1:2,2:1)",
     )
     parser.add_argument(
         "--max_total", type=int, default=0,
-        help="最大总样本数（0=不限制）",
+        help="Maximum total number of samples (0 = no limit)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="随机种子（用于采样）")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed (used for sampling)")
     args = parser.parse_args()
 
     output_dir = project_root / args.output_dir
@@ -142,25 +141,25 @@ def main():
     ratios = [parse_ratio(r) for r in args.ratios.split(",")]
 
     print(f"\n{'='*60}")
-    print("Step 4: 合并最终训练集")
+    print("Step 4: Merge the final training set")
     print(f"{'='*60}")
-    print(f"think 数据:    {args.think_input}")
-    print(f"no_think 数据: {args.no_think_input}")
-    print(f"比例变体:      {args.ratios}")
-    print(f"随机种子:      {args.seed}")
-    print(f"注意: 不做随机打乱（LLaMA-Factory RandomSampler 自动处理）")
+    print(f"think data:    {args.think_input}")
+    print(f"no_think data: {args.no_think_input}")
+    print(f"Ratio variants: {args.ratios}")
+    print(f"Random seed:    {args.seed}")
+    print(f"Note: no shuffling (handled by LLaMA-Factory RandomSampler)")
 
-    # ---- 1. 加载数据 ----
+    # ---- 1. Load data ----
     print(f"\n{'─'*40}")
-    print("1. 加载数据...")
+    print("1. Loading data...")
     think_data = load_jsonl(str(project_root / args.think_input))
     no_think_data = load_jsonl(str(project_root / args.no_think_input))
-    print(f"  think 样本数:    {len(think_data)}")
-    print(f"  no_think 样本数: {len(no_think_data)}")
+    print(f"  think samples:    {len(think_data)}")
+    print(f"  no_think samples: {len(no_think_data)}")
 
-    # ---- 2. 按比例生成各变体 ----
+    # ---- 2. Build each ratio variant ----
     print(f"\n{'─'*40}")
-    print("2. 生成比例变体...")
+    print("2. Generating ratio variants...")
 
     registry_entries = {}
 
@@ -168,7 +167,7 @@ def main():
         ratio_label = f"{rt}_{rn}"
         tc, nc = compute_counts(len(think_data), len(no_think_data), rt, rn)
 
-        # 可选：限制总量
+        # Optional: cap the total size
         if args.max_total > 0 and (tc + nc) > args.max_total:
             scale = args.max_total / (tc + nc)
             tc = int(tc * scale)
@@ -178,36 +177,36 @@ def main():
         sampled_think = random.sample(think_data, tc)
         sampled_no_think = random.sample(no_think_data, nc)
 
-        # 不做 shuffle，直接拼接（think 在前，no_think 在后）
+        # No shuffle; concatenate directly (think first, then no_think)
         combined = sampled_think + sampled_no_think
 
         filename = f"{args.output_name}_{ratio_label}.jsonl"
         output_path = output_dir / filename
         write_jsonl(combined, str(output_path))
 
-        print(f"\n  比例 {rt}:{rn}:")
-        print(f"    think: {tc}, no_think: {nc}, 总计: {tc + nc}")
-        print(f"    输出: {output_path}")
+        print(f"\n  Ratio {rt}:{rn}:")
+        print(f"    think: {tc}, no_think: {nc}, total: {tc + nc}")
+        print(f"    output: {output_path}")
 
-        # 注册条目
+        # Registration entry
         entry_name = f"{args.output_name}_{ratio_label}"
         registry_entries[entry_name] = {
             "file_name": filename,
             **DATASET_INFO_TEMPLATE,
         }
 
-    # ---- 3. 打印注册条目 ----
+    # ---- 3. Print registration entries ----
     print(f"\n{'─'*40}")
-    print("3. dataset_info.json 注册条目（请手动添加到 train/data/dataset_info.json）:")
+    print("3. dataset_info.json entries (add them manually to train/data/dataset_info.json):")
     print(json.dumps(registry_entries, indent=2, ensure_ascii=False))
 
     print(f"\n{'─'*40}")
-    print("提示: 请手动将需要的成品文件从")
+    print("Note: copy the final files you need from")
     print(f"  {output_dir}/")
-    print("复制到 train/data/ 并在 dataset_info.json 中注册。")
+    print("to train/data/ and register them in dataset_info.json.")
 
     print(f"\n{'='*60}")
-    print("Step 4 完成!")
+    print("Step 4 done!")
     print(f"{'='*60}")
 
 

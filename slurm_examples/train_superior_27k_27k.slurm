@@ -11,7 +11,7 @@
 #SBATCH --mem=256G
 #SBATCH --time=120:00:00
 
-# ========== Qwen3-4B PLE Superior 27k+27k 训练 (H200) ==========
+# ========== Train Qwen3-4B PLE (Superior 27k+27k) ==========
 
 source ~/.bashrc
 conda activate llms

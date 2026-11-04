@@ -6,12 +6,10 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Qwen3 PLE (Path-Lock Expert) 独立版本模块。
+"""Standalone Qwen3 PLE (Path-Lock Expert) module (imports use the pip-installed transformers).
 
-Qwen3 PLE 实现。import 路径为 pip 安装的 transformers 路径，可独立使用。
-
-路由检测规则：anchor + tokenizer.decode + regex negative-lookbehind + last-occurrence-wins + safe-mode。
-详见 modeling_qwen3_ple.py 顶部 docstring 与配套 plan 文档。
+Routing detection: anchor + tokenizer.decode + regex negative-lookbehind + last-occurrence-wins + safe-mode.
+See the top-level docstring of modular_qwen3_ple.py for details.
 """
 
 from .configuration_qwen3_ple import Qwen3PLEConfig

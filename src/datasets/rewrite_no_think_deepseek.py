@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""使用 DeepSeek API 将 self-reflective CoT 答案改写为简洁 step-by-step 解答
+"""Rewrite self-reflective CoT answers into concise step-by-step solutions with the DeepSeek API
 
-将 Superior Reasoning 数据集中已有的长篇 self-reflective 推理过程，
-喂给 DeepSeek V3.2，浓缩为 straight-forward 的 step-by-step 解题过程。
+Takes the long self-reflective reasoning already present in the Superior Reasoning dataset
+and feeds it to DeepSeek V3.2, which condenses it into a straight-forward step-by-step solution.
 
-优势：利用已有的正确推理路径进行改写，而非从头生成，预期通过率远高于旧方案。
+Rewriting an existing correct reasoning path (instead of generating from scratch) keeps the pass rate high.
 
-输入：
+Input:
   - HuggingFace: Alibaba-Apsara/Superior-Reasoning-SFT-gpt-oss-120b (stage1)
-  - metadata.jsonl (uuid → ground_truth 映射)
+  - metadata.jsonl (uuid -> ground_truth mapping)
 
-输出：
-  - no_think_deepseek_rewrite.jsonl（与 filter_no_think_data.py 兼容的格式）
+Output:
+  - no_think_deepseek_rewrite.jsonl (format compatible with filter_no_think_data.py)
 
-使用方法:
-    conda activate gpt-oss
+Usage:
 
-    # 冒烟测试（20 条）
+    # Smoke test (20 samples)
     python -m src.datasets.rewrite_no_think_deepseek --limit 20
 
-    # 完整运行
+    # Full run
     python -m src.datasets.rewrite_no_think_deepseek
 
-依赖:
+Dependencies:
     pip install aiohttp datasets
 """
 
@@ -39,10 +38,10 @@ from pathlib import Path
 try:
     import aiohttp
 except ImportError:
-    print("请安装 aiohttp: pip install aiohttp")
+    print("Please install aiohttp: pip install aiohttp")
     sys.exit(1)
 
-# 项目根目录
+# Project root directory
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -77,7 +76,7 @@ Rules:
 **Clean Solution:**"""
 
 
-# ==================== 反思性词汇检测 ====================
+# ==================== Reflective-word detection ====================
 
 REASONING_PATTERNS = [
     r'\bwait\b',
@@ -89,27 +88,27 @@ REASONING_PATTERNS = [
     r'\bthink\b',
     r'<think>',
 ]
-# 以下 pattern 不作为过滤条件（正常数学语言，非 self-reflective）:
-# r'\bstep \d+\b'  — 结构化步骤标记
-# r'\bconsider\b'  — 数学中的正常用语 (e.g., "consider the function f(x)")
-# r'\bwe can\b', r'\bwe need to\b' — 正常解题语言
-# r'\bnote that\b', r'\brecall that\b' — 引用定理/性质
-# r'\bfirst\b.*\bthen\b' — 步骤顺序描述
+# The patterns below are NOT used as filters (normal math language, not self-reflective):
+# r'\bstep \d+\b'  — structured step markers
+# r'\bconsider\b'  — normal wording in math (e.g., "consider the function f(x)")
+# r'\bwe can\b', r'\bwe need to\b' — normal problem-solving language
+# r'\bnote that\b', r'\brecall that\b' — citing theorems/properties
+# r'\bfirst\b.*\bthen\b' — description of step order
 _COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in REASONING_PATTERNS]
 
 
 def check_no_reasoning_style(text: str) -> bool:
-    """检测文本是否包含反思性词汇，True = 通过（无反思词汇）"""
+    """Check whether the text contains reflective words; True = pass (no reflective words)"""
     for pattern in _COMPILED_PATTERNS:
         if pattern.search(text):
             return False
     return True
 
 
-# ==================== 答案提取 ====================
+# ==================== Answer extraction ====================
 
 def extract_boxed_answer(text: str) -> str | None:
-    """从文本中提取 \\boxed{...} 内的答案（栈匹配，支持嵌套大括号）"""
+    """Extract the answer inside \\boxed{...} from text (stack matching, nested braces supported)"""
     pattern = r'\\boxed\s*\{'
     matches = list(re.finditer(pattern, text))
     if not matches:
@@ -134,10 +133,10 @@ def extract_boxed_answer(text: str) -> str | None:
     return answer if answer else None
 
 
-# ==================== 断点续传 ====================
+# ==================== Resume from checkpoint ====================
 
 def load_completed_uuids(output_path: str) -> set:
-    """扫描已有输出文件，收集已完成的 uuid 集合"""
+    """Scan the existing output file and collect the set of completed uuids"""
     completed = set()
     if not os.path.exists(output_path):
         return completed
@@ -157,7 +156,7 @@ def load_completed_uuids(output_path: str) -> set:
     return completed
 
 
-# ==================== 数据加载 ====================
+# ==================== Data loading ====================
 
 def load_dataset_with_ground_truth(
     dataset_name: str,
@@ -166,22 +165,22 @@ def load_dataset_with_ground_truth(
     metadata_path: str,
     cache_dir: str | None = None,
 ) -> list[dict]:
-    """从 HuggingFace 加载数据集，并关联 metadata 中的 ground_truth"""
+    """Load the dataset from HuggingFace and attach the ground_truth from metadata"""
     from datasets import load_dataset
 
     all_data = []
     for stage in stages:
-        print(f"  加载 {stage}...")
+        print(f"  Loading {stage}...")
         ds = load_dataset(dataset_name, stage, cache_dir=cache_dir)
         if isinstance(ds, dict):
             stage_data = ds.get("train", ds[list(ds.keys())[0]])
         else:
             stage_data = ds
-        print(f"    {stage} 样本数: {len(stage_data)}")
+        print(f"    {stage} samples: {len(stage_data)}")
         all_data.extend(stage_data)
 
     filtered = [item for item in all_data if item.get("domain", "") in domains]
-    print(f"  过滤后 ({', '.join(domains)}): {len(filtered)} 条")
+    print(f"  After filtering ({', '.join(domains)}): {len(filtered)}")
 
     gt_map = {}
     if os.path.exists(metadata_path):
@@ -191,7 +190,7 @@ def load_dataset_with_ground_truth(
                 if line:
                     meta = json.loads(line)
                     gt_map[meta.get("uuid", "")] = meta.get("ground_truth")
-        print(f"  metadata ground_truth: {len(gt_map)} 条")
+        print(f"  metadata ground_truth: {len(gt_map)}")
 
     result = []
     for item in filtered:
@@ -207,7 +206,7 @@ def load_dataset_with_ground_truth(
     return result
 
 
-# ==================== DeepSeek API 调用 ====================
+# ==================== DeepSeek API call ====================
 
 async def call_deepseek(
     session: aiohttp.ClientSession,
@@ -221,12 +220,12 @@ async def call_deepseek(
     semaphore: asyncio.Semaphore,
     rpm_delay: float,
 ) -> tuple[str | None, dict | None]:
-    """调用 DeepSeek OpenAI-compatible API 改写单条样本
+    """Call the DeepSeek OpenAI-compatible API to rewrite one sample
 
     Returns:
-        (改写结果, 错误信息)
-        成功: (text, None)
-        失败: (None, {"error_type": ..., "error_message": ...})
+        (rewritten result, error info)
+        success: (text, None)
+        failure: (None, {"error_type": ..., "error_message": ...})
     """
     prompt = REWRITE_PROMPT_TEMPLATE.format(question=question, solution=solution)
 
@@ -235,7 +234,7 @@ async def call_deepseek(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    # deepseek-reasoner 不支持 temperature/top_p 等采样参数
+    # deepseek-reasoner does not support sampling parameters such as temperature/top_p
     is_reasoner = "reasoner" in model_name.lower()
 
     messages = [
@@ -248,7 +247,7 @@ async def call_deepseek(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    # 仅非 reasoner 模式支持 temperature
+    # Only non-reasoner mode supports temperature
     if not is_reasoner:
         payload["temperature"] = temperature
 
@@ -263,8 +262,8 @@ async def call_deepseek(
                     if resp.status == 200:
                         data = await resp.json()
                         message = data["choices"][0]["message"]
-                        # deepseek-reasoner 返回 reasoning_content (CoT) + content (最终答案)
-                        # 我们只取 content（最终的 clean 答案）
+                        # deepseek-reasoner returns reasoning_content (CoT) + content (final answer)
+                        # We only take content (the final clean answer)
                         content = message.get("content", "")
                         finish_reason = data["choices"][0].get("finish_reason", "")
 
@@ -280,7 +279,7 @@ async def call_deepseek(
                         else:
                             last_error = {
                                 "error_type": "empty_response",
-                                "error_message": f"API 返回空内容, finish_reason={finish_reason}",
+                                "error_message": f"API returned empty content, finish_reason={finish_reason}",
                                 "details": {"attempts": attempt + 1},
                             }
                             if attempt < 2:
@@ -289,9 +288,9 @@ async def call_deepseek(
                             return (None, last_error)
 
                     elif resp.status == 429:
-                        # 速率限制
+                        # Rate limiting
                         wait_time = 30 * (attempt + 1)
-                        print(f"  速率限制 (429)，等待 {wait_time}s...")
+                        print(f"  Rate limited (429), waiting {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         last_error = {
                             "error_type": "rate_limit",
@@ -315,7 +314,7 @@ async def call_deepseek(
             except asyncio.TimeoutError:
                 last_error = {
                     "error_type": "timeout",
-                    "error_message": "请求超时 (300s)",
+                    "error_message": "Request timed out (300s)",
                     "details": {"attempts": attempt + 1},
                 }
                 if attempt < 2:
@@ -337,7 +336,7 @@ async def call_deepseek(
     return (None, last_error)
 
 
-# ==================== 批量处理 ====================
+# ==================== Batch processing ====================
 
 async def rewrite_batch(
     items: list[dict],
@@ -350,7 +349,7 @@ async def rewrite_batch(
     rpm_limit: int,
     output_path: str,
 ):
-    """异步批量改写"""
+    """Rewrite in asynchronous batches"""
     semaphore = asyncio.Semaphore(batch_size)
     rpm_delay = 60.0 / rpm_limit if rpm_limit > 0 else 0
 
@@ -360,7 +359,7 @@ async def rewrite_batch(
     per_item_times = []
     start_time = time.time()
 
-    # 小规模时每条都打印进度，大规模时每 100 条
+    # Print progress for every item at small scale, every 100 items at large scale
     log_interval = 1 if len(items) <= 50 else 100
 
     f_out = open(output_path, "a", encoding="utf-8")
@@ -424,11 +423,11 @@ async def rewrite_batch(
                 remaining = (len(items) - total_done) / max(speed, 0.01)
                 print(
                     f"  [{total_done}/{len(items)}] "
-                    f"成功:{completed} 失败:{failed} 风格异常:{style_flagged} | "
-                    f"本条:{item_elapsed:.1f}s | "
-                    f"平均:{sum(per_item_times)/len(per_item_times):.1f}s/条 | "
-                    f"速度:{speed:.2f}条/秒 | "
-                    f"剩余:{remaining/60:.1f}分钟"
+                    f"Succeeded:{completed} Failed:{failed} Style flagged:{style_flagged} | "
+                    f"This item:{item_elapsed:.1f}s | "
+                    f"Average:{sum(per_item_times)/len(per_item_times):.1f}s/item | "
+                    f"Speed:{speed:.2f} items/s | "
+                    f"Remaining:{remaining/60:.1f} min"
                 )
 
         tasks = [process_item(item) for item in items]
@@ -439,65 +438,65 @@ async def rewrite_batch(
     elapsed = time.time() - start_time
     avg_time = sum(per_item_times) / len(per_item_times) if per_item_times else 0
     print(f"\n  {'='*50}")
-    print(f"  改写完成!")
+    print(f"  Rewrite finished!")
     print(f"  {'='*50}")
-    print(f"  成功: {completed} | 失败: {failed} | 风格异常: {style_flagged}")
-    print(f"  风格通过率: {(completed - style_flagged) / max(completed, 1) * 100:.1f}%")
-    print(f"  总耗时: {elapsed:.1f}s ({elapsed / 60:.1f} 分钟)")
-    print(f"  平均每条: {avg_time:.1f}s")
-    print(f"  吞吐量: {(completed + failed) / max(elapsed, 0.01):.2f} 条/秒")
+    print(f"  Succeeded: {completed} | Failed: {failed} | Style flagged: {style_flagged}")
+    print(f"  Style pass rate: {(completed - style_flagged) / max(completed, 1) * 100:.1f}%")
+    print(f"  Total time: {elapsed:.1f}s ({elapsed / 60:.1f} min)")
+    print(f"  Average per item: {avg_time:.1f}s")
+    print(f"  Throughput: {(completed + failed) / max(elapsed, 0.01):.2f} items/s")
     print(f"  {'─'*50}")
-    print(f"  65K 全量预估:")
-    print(f"    时间: {65150 * avg_time / 3600:.1f} 小时 (串行)")
-    print(f"    时间: {65150 / max((completed + failed) / max(elapsed, 0.01), 0.01) / 3600:.1f} 小时 (当前并发)")
+    print(f"  Full-run estimate (65K samples):")
+    print(f"    Time: {65150 * avg_time / 3600:.1f} hours (serial)")
+    print(f"    Time: {65150 / max((completed + failed) / max(elapsed, 0.01), 0.01) / 3600:.1f} hours (current concurrency)")
     print(f"  {'='*50}")
 
 
-# ==================== 主流程 ====================
+# ==================== Main ====================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="使用 DeepSeek API 将 self-reflective CoT 答案改写为简洁 step-by-step 解答"
+        description="Rewrite self-reflective CoT answers into concise step-by-step solutions with the DeepSeek API"
     )
     parser.add_argument(
         "--output", type=str,
         default="datasets/hybrid_superior_reasoning/no_think_deepseek_rewrite.jsonl",
-        help="输出文件路径",
+        help="Output file path",
     )
     parser.add_argument(
         "--metadata_input", type=str,
         default="datasets/superior_reasoning/metadata.jsonl",
-        help="metadata.jsonl 路径（用于 ground_truth，仍从 superior_reasoning 读取）",
+        help="Path to metadata.jsonl (for ground_truth, still read from superior_reasoning)",
     )
     parser.add_argument(
         "--dataset_name", type=str,
         default="Alibaba-Apsara/Superior-Reasoning-SFT-gpt-oss-120b",
-        help="HuggingFace 数据集名称",
+        help="HuggingFace dataset name",
     )
-    parser.add_argument("--stages", type=str, default="stage1", help="数据集 stages")
-    parser.add_argument("--domains", type=str, default="math,science", help="过滤 domains")
-    parser.add_argument("--limit", type=int, default=0, help="仅处理前 N 条（0=不限制，用于冒烟测试）")
-    parser.add_argument("--batch_size", type=int, default=50, help="并发请求数")
-    parser.add_argument("--rpm_limit", type=int, default=300, help="每分钟最大请求数")
-    parser.add_argument("--max_tokens", type=int, default=8192, help="最大输出 token 数")
-    parser.add_argument("--temperature", type=float, default=0.0, help="采样温度 (deepseek-reasoner 不支持此参数)")
+    parser.add_argument("--stages", type=str, default="stage1", help="Dataset stages")
+    parser.add_argument("--domains", type=str, default="math,science", help="Domains to keep")
+    parser.add_argument("--limit", type=int, default=0, help="Only process the first N samples (0 = no limit, for smoke tests)")
+    parser.add_argument("--batch_size", type=int, default=50, help="Number of concurrent requests")
+    parser.add_argument("--rpm_limit", type=int, default=300, help="Maximum requests per minute")
+    parser.add_argument("--max_tokens", type=int, default=8192, help="Maximum number of output tokens")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature (not supported by deepseek-reasoner)")
     parser.add_argument(
         "--model_name", type=str, default="deepseek-reasoner",
-        help="DeepSeek 模型名称 (默认: deepseek-reasoner, 即 R1)",
+        help="DeepSeek model name (default: deepseek-reasoner, i.e. R1)",
     )
     parser.add_argument(
         "--api_url", type=str, default="https://api.deepseek.com/v1",
         help="DeepSeek API base URL",
     )
-    parser.add_argument("--api_key_env", type=str, default="DEEPSEEK_API_KEY", help="API key 环境变量名")
-    parser.add_argument("--cache_dir", type=str, default=None, help="HuggingFace 缓存目录")
+    parser.add_argument("--api_key_env", type=str, default="DEEPSEEK_API_KEY", help="Environment variable holding the API key")
+    parser.add_argument("--cache_dir", type=str, default=None, help="HuggingFace cache directory")
     parser.add_argument(
         "--include_uuids", type=str, default=None,
-        help="仅处理此文件中的 UUID（JSONL 格式，含 uuid 字段）",
+        help="Only process the UUIDs in this file (JSONL format, with a uuid field)",
     )
     parser.add_argument(
         "--exclude_uuids", type=str, default=None,
-        help="排除此文件中的 UUID（JSONL 格式，含 uuid 字段）",
+        help="Exclude the UUIDs in this file (JSONL format, with a uuid field)",
     )
     args = parser.parse_args()
 
@@ -508,37 +507,37 @@ def main():
     target_domains = set(args.domains.split(","))
     target_stages = args.stages.split(",")
 
-    # 获取 API key
+    # Get the API key
     api_key = os.environ.get(args.api_key_env)
     if not api_key:
-        print(f"ERROR: 请设置环境变量 {args.api_key_env}")
+        print(f"ERROR: please set the environment variable {args.api_key_env}")
         sys.exit(1)
 
     print(f"\n{'='*60}")
-    print("DeepSeek Rewrite: 改写 self-reflective CoT → step-by-step 解答")
+    print("DeepSeek Rewrite: self-reflective CoT -> step-by-step solution")
     print(f"{'='*60}")
-    print(f"模型:       {args.model_name}")
+    print(f"Model:       {args.model_name}")
     print(f"API URL:    {args.api_url}")
-    print(f"输出:       {output_path}")
-    print(f"并发数:     {args.batch_size}")
-    print(f"RPM 限制:   {args.rpm_limit}")
+    print(f"Output:      {output_path}")
+    print(f"Concurrency: {args.batch_size}")
+    print(f"RPM limit:   {args.rpm_limit}")
     print(f"max_tokens: {args.max_tokens}")
     print(f"temperature: {args.temperature}")
     if args.limit > 0:
-        print(f"限制数量:   仅处理前 {args.limit} 条")
+        print(f"Limit:       only the first {args.limit} samples")
 
-    # ---- 1. 断点续传检查 ----
+    # ---- 1. Resume check ----
     print(f"\n{'─'*40}")
-    print("1. 检查断点续传状态...")
+    print("1. Checking resume state...")
     completed_uuids = load_completed_uuids(str(output_path))
     if completed_uuids:
-        print(f"  发现 {len(completed_uuids)} 条已完成记录，将跳过")
+        print(f"  Found {len(completed_uuids)} completed records, they will be skipped")
     else:
-        print(f"  无已完成记录，从头开始")
+        print(f"  No completed records, starting from scratch")
 
-    # ---- 2. 加载数据集 ----
+    # ---- 2. Load the dataset ----
     print(f"\n{'─'*40}")
-    print("2. 加载数据集...")
+    print("2. Loading dataset...")
     all_items = load_dataset_with_ground_truth(
         dataset_name=args.dataset_name,
         stages=target_stages,
@@ -547,7 +546,7 @@ def main():
         cache_dir=args.cache_dir,
     )
 
-    # 加载 include/exclude UUID 过滤
+    # Load the include/exclude UUID filters
     include_set = None
     exclude_set = None
     if args.include_uuids:
@@ -558,7 +557,7 @@ def main():
                 line = line.strip()
                 if line:
                     include_set.add(json.loads(line).get("uuid", ""))
-        print(f"  include_uuids: {len(include_set)} 条 (从 {include_path})")
+        print(f"  include_uuids: {len(include_set)} (from {include_path})")
 
     if args.exclude_uuids:
         exclude_path = project_root / args.exclude_uuids
@@ -568,9 +567,9 @@ def main():
                 line = line.strip()
                 if line:
                     exclude_set.add(json.loads(line).get("uuid", ""))
-        print(f"  exclude_uuids: {len(exclude_set)} 条 (从 {exclude_path})")
+        print(f"  exclude_uuids: {len(exclude_set)} (from {exclude_path})")
 
-    # 过滤
+    # Filter
     pending = []
     for item in all_items:
         uuid = item["uuid"]
@@ -582,21 +581,21 @@ def main():
             continue
         pending.append(item)
 
-    print(f"  总样本数: {len(all_items)}")
-    print(f"  待处理:   {len(pending)}")
-    print(f"  已跳过:   {len(all_items) - len(pending)}")
+    print(f"  Total samples: {len(all_items)}")
+    print(f"  Pending:       {len(pending)}")
+    print(f"  Skipped:       {len(all_items) - len(pending)}")
 
     if args.limit > 0 and len(pending) > args.limit:
         pending = pending[:args.limit]
-        print(f"  应用 --limit={args.limit}，实际处理: {len(pending)} 条")
+        print(f"  Applying --limit={args.limit}, actually processing: {len(pending)}")
 
     if not pending:
-        print("\n  所有样本已处理完毕。")
+        print("\n  All samples have been processed.")
         return
 
-    # ---- 3. 测试 API 连通性 ----
+    # ---- 3. Test API connectivity ----
     print(f"\n{'─'*40}")
-    print("3. 测试 API 连通性...")
+    print("3. Testing API connectivity...")
     import urllib.request
     try:
         req = urllib.request.Request(
@@ -604,14 +603,14 @@ def main():
             headers={"Authorization": f"Bearer {api_key}"},
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"  API 连通正常 (status={resp.status})")
+            print(f"  API connection OK (status={resp.status})")
     except Exception as e:
-        print(f"  WARNING: API 连通测试失败: {e}")
-        print(f"  将继续尝试...")
+        print(f"  WARNING: API connectivity test failed: {e}")
+        print(f"  Will keep trying...")
 
-    # ---- 4. 开始改写 ----
+    # ---- 4. Start rewriting ----
     print(f"\n{'─'*40}")
-    print("4. 开始批量改写...")
+    print("4. Starting batch rewrite...")
     asyncio.run(
         rewrite_batch(
             items=pending,
@@ -626,9 +625,9 @@ def main():
         )
     )
 
-    # ---- 5. 统计 ----
+    # ---- 5. Statistics ----
     print(f"\n{'─'*40}")
-    print("5. 输出统计...")
+    print("5. Output statistics...")
     total_out = 0
     success_out = 0
     style_pass = 0
@@ -644,13 +643,13 @@ def main():
                 if item.get("style_check_passed", False):
                     style_pass += 1
 
-    print(f"  输出文件总行数: {total_out}")
-    print(f"  成功生成: {success_out}")
-    print(f"  风格通过: {style_pass} ({style_pass / max(success_out, 1) * 100:.1f}%)")
-    print(f"  输出文件: {output_path}")
+    print(f"  Total lines in output file: {total_out}")
+    print(f"  Successfully generated: {success_out}")
+    print(f"  Style passed: {style_pass} ({style_pass / max(success_out, 1) * 100:.1f}%)")
+    print(f"  Output file: {output_path}")
 
     print(f"\n{'='*60}")
-    print("改写完成!")
+    print("Rewrite finished!")
     print(f"{'='*60}")
 
 

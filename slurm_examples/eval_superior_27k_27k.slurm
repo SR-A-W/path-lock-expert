@@ -13,7 +13,7 @@
 #SBATCH --output=logs/%x/%x_%A_%a.out
 #SBATCH --error=logs/%x/%x_%A_%a.err
 
-# ========= Qwen3-4B PLE Superior 27k+27k 评估 =========
+# ========= Evaluate Qwen3-4B PLE (Superior 27k+27k) =========
 
 mkdir -p "logs/${SLURM_JOB_NAME}"
 
@@ -21,7 +21,7 @@ _SAVED_CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES}"
 _SAVED_SLURM_JOB_GPUS="${SLURM_JOB_GPUS}"
 _SAVED_GPU_DEVICE_ORDINAL="${GPU_DEVICE_ORDINAL}"
 
-# NOTE:----------训练完成后更新 MODEL_PATH----------
+# Set MODEL_PATH to the checkpoint produced by the training job
 MODEL_PATH="${PROJECT_ROOT}/train/saves/qwen3_4b_superior_27k_27k"
 EVAL_RESULTS_BASE="${PROJECT_ROOT}/eval/results"
 CATEGORY="ple"

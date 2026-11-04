@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""将源模型权重复制到 PLE 模型（内存优化版本，支持 Qwen2/Qwen3）
+"""Copy source-model weights into a PLE model (memory-optimized, supports Qwen2/Qwen3)
 
-采用流式处理 safetensors 的策略，逐分片读取和写入，避免同时加载完整模型。
-峰值内存控制在单个分片大小（约 5GB），适合在 RAM 有限的环境下运行。
+Streams the safetensors shards, reading and writing one shard at a time instead of loading the whole model.
+Peak memory is bounded by the size of one shard (about 5GB), so it runs on machines with limited RAM.
 
-权重复制策略（PLE，无 gate/router 权重）：
-- 从单一源模型复制所有权重：
-  - Embedding、Attention、LayerNorm、lm_head → 直接复制（共享层）
-  - MLP 权重 (gate_proj, up_proj, down_proj) → 同时复制到 Expert 0 和 Expert 1
-- 两个 Expert 初始化相同，SFT 过程中会自然分化。
-- PLE 无 gate/router 权重，路由完全由控制 token 硬决定。
+Weight-copy strategy (PLE, no gate/router weights):
+- All weights are copied from a single source model:
+  - Embedding, Attention, LayerNorm, lm_head -> copied directly (shared layers)
+  - MLP weights (gate_proj, up_proj, down_proj) -> copied to both Expert 0 and Expert 1
+- The two experts start identical and diverge naturally during SFT.
+- PLE has no gate/router weights; routing is decided entirely by the control tokens.
 
-支持的模型族：
-- qwen2: Qwen2.5-7B-Instruct 等（attention 有 bias，无 q/k norm）
-- qwen3: Qwen3-4B-Instruct 等（attention 无 bias，有 q/k norm）
+Supported model families:
+- qwen2: Qwen2.5-7B-Instruct etc. (attention has bias, no q/k norm)
+- qwen3: Qwen3-4B-Instruct etc. (attention has no bias, has q/k norm)
 
-使用方法:
+Usage:
     python -m src.utils.copy_weights_to_ple \\
         --source_model_path ./models/source/Qwen2.5-7B-Instruct \\
         --output_path ./models/ple_initialized
@@ -25,7 +25,7 @@
         --source_model_path ./models/source/Qwen3-4B-Instruct-2507 \\
         --output_path ./models/qwen3_4b_instruct_ple_initialized
 
-依赖:
+Dependencies:
     pip install transformers torch safetensors
 """
 
@@ -42,14 +42,14 @@ from typing import Dict, List, Tuple
 
 import torch
 
-# 项目根目录
+# Project root directory
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 
-# ==================== 模型族配置映射 ====================
+# ==================== Model-family config mapping ====================
 
-# 各模型族的 PLE 配置参数
+# PLE config parameters for each model family
 MODEL_FAMILY_CONFIG = {
     "qwen2": {
         "model_type": "qwen2_ple",
@@ -61,11 +61,11 @@ MODEL_FAMILY_CONFIG = {
         "model_code_dir": "qwen2_ple",
         "config_filename": "configuration_qwen2_ple.py",
         "modeling_filename": "modeling_qwen2_ple.py",
-        # Qwen2 每层权重数（PLE 化后）：
+        # Per-layer weight count for Qwen2 (after PLE conversion):
         # self_attn: q.w, q.b, k.w, k.b, v.w, v.b, o.w = 7
         # layernorm: input_layernorm.w, post_attention_layernorm.w = 2
         # MLP experts: 3 weights × 2 experts = 6
-        # 总计 = 7 + 2 + 6 = 15
+        # Total = 7 + 2 + 6 = 15
         "expected_per_layer": 15,
     },
     "qwen3": {
@@ -78,12 +78,12 @@ MODEL_FAMILY_CONFIG = {
         "model_code_dir": "qwen3_ple",
         "config_filename": "configuration_qwen3_ple.py",
         "modeling_filename": "modeling_qwen3_ple.py",
-        # Qwen3 每层权重数（PLE 化后）：
-        # self_attn: q.w, k.w, v.w, o.w = 4（无 bias，attention_bias=False）
-        # self_attn: q_norm.w, k_norm.w = 2（QK normalization，Qwen3 特有）
+        # Per-layer weight count for Qwen3 (after PLE conversion):
+        # self_attn: q.w, k.w, v.w, o.w = 4 (no bias, attention_bias=False)
+        # self_attn: q_norm.w, k_norm.w = 2 (QK normalization, Qwen3-specific)
         # layernorm: input_layernorm.w, post_attention_layernorm.w = 2
         # MLP experts: 3 weights × 2 experts = 6
-        # 总计 = 4 + 2 + 2 + 6 = 14
+        # Total = 4 + 2 + 2 + 6 = 14
         "expected_per_layer": 14,
     },
     "llama": {
@@ -96,11 +96,11 @@ MODEL_FAMILY_CONFIG = {
         "model_code_dir": "llama_ple",
         "config_filename": "configuration_llama_ple.py",
         "modeling_filename": "modeling_llama_ple.py",
-        # LLaMA 每层权重数（PLE 化后）：
-        # self_attn: q.w, k.w, v.w, o.w = 4（无 bias，无 q/k norm）
+        # Per-layer weight count for LLaMA (after PLE conversion):
+        # self_attn: q.w, k.w, v.w, o.w = 4 (no bias, no q/k norm)
         # layernorm: input_layernorm.w, post_attention_layernorm.w = 2
         # MLP experts: 3 weights × 2 experts = 6
-        # 总计 = 4 + 2 + 6 = 12
+        # Total = 4 + 2 + 6 = 12
         "expected_per_layer": 12,
     },
     "phi3": {
@@ -113,27 +113,27 @@ MODEL_FAMILY_CONFIG = {
         "model_code_dir": "phi4_mini_ple",
         "config_filename": "configuration_phi4_mini_ple.py",
         "modeling_filename": "modeling_phi4_mini_ple.py",
-        # Phi3/Phi-4-mini 每层权重数（PLE 化后）：
-        # self_attn: qkv_proj.w, o_proj.w = 2（融合 QKV，无 bias）
+        # Per-layer weight count for Phi3/Phi-4-mini (after PLE conversion):
+        # self_attn: qkv_proj.w, o_proj.w = 2 (fused QKV, no bias)
         # layernorm: input_layernorm.w, post_attention_layernorm.w = 2
         # MLP experts: 2 weights (gate_up_proj, down_proj) × 2 experts = 4
-        # 总计 = 2 + 2 + 4 = 8
+        # Total = 2 + 2 + 4 = 8
         "expected_per_layer": 8,
     },
 }
 
 
 def detect_model_family(source_config: dict) -> str:
-    """从源模型配置自动检测模型族
+    """Auto-detect the model family from the source model config
 
     Args:
-        source_config: 源模型 config.json 内容
+        source_config: contents of the source model's config.json
 
     Returns:
-        模型族名称: "qwen2" 或 "qwen3"
+        model family name: "qwen2" or "qwen3"
 
     Raises:
-        ValueError: 不支持的模型类型
+        ValueError: unsupported model type
     """
     model_type = source_config.get("model_type", "")
     if model_type.startswith("qwen3"):
@@ -146,51 +146,51 @@ def detect_model_family(source_config: dict) -> str:
         return "phi3"
     else:
         raise ValueError(
-            f"不支持的模型类型: {model_type}。"
-            f"当前支持: qwen2, qwen3, llama, phi3。"
-            f"可通过 --model_family 参数手动指定。"
+            f"Unsupported model type: {model_type}. "
+            f"Currently supported: qwen2, qwen3, llama, phi3. "
+            f"Use --model_family to specify it manually."
         )
 
 
-# ==================== PLE 配置生成 ====================
+# ==================== PLE config generation ====================
 
 def create_ple_config(source_config: dict, output_path: str, model_family: str) -> dict:
-    """基于源模型配置创建 PLE 配置
+    """Create the PLE config from the source model config
 
-    PLE 配置继承源模型的全部基础参数（hidden_size、attention 参数等），
-    并修改 model_type、architectures，以及添加路由相关配置。
+    The PLE config inherits all base parameters of the source model (hidden_size, attention parameters, etc.),
+    changes model_type and architectures, and adds the routing-related settings.
 
     Args:
-        source_config: 源模型的 config.json 内容
-        output_path: 输出目录路径
-        model_family: 模型族（"qwen2" 或 "qwen3"）
+        source_config: contents of the source model's config.json
+        output_path: output directory path
+        model_family: model family ("qwen2" or "qwen3")
 
     Returns:
-        PLE 配置字典
+        PLE config dict
     """
     family_config = MODEL_FAMILY_CONFIG[model_family]
 
     print(f"\n{'='*60}")
-    print(f"创建 PLE 配置（模型族: {model_family}）")
+    print(f"Creating PLE config (model family: {model_family})")
     print(f"{'='*60}")
 
     ple_config = source_config.copy()
 
-    # 修改模型类型标识（根据模型族）
+    # Change the model type identifiers (depends on the model family)
     ple_config['model_type'] = family_config['model_type']
     ple_config['architectures'] = family_config['architectures']
 
-    # PLE 路由配置
-    # think_token_id / no_think_token_id 在 tokenizer 配置完成后由 register_control_tokens.py 设置
+    # PLE routing config
+    # think_token_id / no_think_token_id are set by register_control_tokens.py after the tokenizer is configured
     ple_config['think_token_id'] = None
     ple_config['no_think_token_id'] = None
-    # 默认走 expert 0（no_think），因为初始化阶段共享层与 expert 0 完全兼容
+    # Default to expert 0 (no_think), since at initialization the shared layers are fully compatible with expert 0
     ple_config['default_routing_index'] = 0
 
-    # auto_map: 支持 trust_remote_code 加载自定义模型
+    # auto_map: supports loading the custom model with trust_remote_code
     ple_config['auto_map'] = family_config['auto_map']
 
-    # 保存配置
+    # Save the config
     os.makedirs(output_path, exist_ok=True)
     config_path = os.path.join(output_path, "config.json")
     with open(config_path, 'w', encoding='utf-8') as f:
@@ -198,31 +198,31 @@ def create_ple_config(source_config: dict, output_path: str, model_family: str) 
 
     print(f"  - model_type: {family_config['model_type']}")
     print(f"  - architectures: {family_config['architectures']}")
-    print(f"  - default_routing_index: 0 (no_think 模式)")
-    print(f"  - 配置已保存到: {config_path}")
+    print(f"  - default_routing_index: 0 (no_think mode)")
+    print(f"  - Config saved to: {config_path}")
 
     return ple_config
 
 
-# ==================== 辅助文件复制 ====================
+# ==================== Auxiliary file copying ====================
 
 def copy_auxiliary_files(source_model_path: str, output_path: str, model_family: str):
-    """复制模型辅助文件（tokenizer、模型代码等）
+    """Copy auxiliary model files (tokenizer, model code, etc.)
 
     Args:
-        source_model_path: 源模型路径
-        output_path: 输出目录路径
-        model_family: 模型族（"qwen2" 或 "qwen3"）
+        source_model_path: source model path
+        output_path: output directory path
+        model_family: model family ("qwen2" or "qwen3")
     """
     family_config = MODEL_FAMILY_CONFIG[model_family]
 
     print(f"\n{'='*60}")
-    print("复制模型辅助文件")
+    print("Copying auxiliary model files")
     print(f"{'='*60}")
 
     os.makedirs(output_path, exist_ok=True)
 
-    # 1. 复制 tokenizer 和生成配置文件
+    # 1. Copy the tokenizer and generation config files
     files_to_copy = [
         'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
         'vocab.json', 'merges.txt', 'added_tokens.json',
@@ -233,9 +233,9 @@ def copy_auxiliary_files(source_model_path: str, output_path: str, model_family:
         src = os.path.join(source_model_path, filename)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(output_path, filename))
-            print(f"  ✅ 复制: {filename}")
+            print(f"  ✅ Copied: {filename}")
 
-    # 2. 复制 PLE 模型代码文件（用于 trust_remote_code 加载）
+    # 2. Copy the PLE model code files (for loading with trust_remote_code)
     ple_dir = os.path.join(project_root, "src", "models", family_config["model_code_dir"])
     model_code_files = [family_config["config_filename"], family_config["modeling_filename"]]
 
@@ -243,15 +243,15 @@ def copy_auxiliary_files(source_model_path: str, output_path: str, model_family:
         src = os.path.join(ple_dir, filename)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(output_path, filename))
-            print(f"  ✅ 复制模型代码: {filename}")
+            print(f"  ✅ Copied model code: {filename}")
         else:
-            print(f"  ⚠️ 模型代码文件不存在: {src}")
+            print(f"  ⚠️ Model code file not found: {src}")
 
 
-# ==================== safetensors 分片工具 ====================
+# ==================== safetensors shard helpers ====================
 
 def get_shard_files(model_path: str) -> List[str]:
-    """获取模型的 safetensors 分片文件列表"""
+    """Get the list of safetensors shard files of a model"""
     index_file = os.path.join(model_path, "model.safetensors.index.json")
     if os.path.exists(index_file):
         with open(index_file, 'r') as f:
@@ -262,10 +262,10 @@ def get_shard_files(model_path: str) -> List[str]:
     if os.path.exists(single):
         return ["model.safetensors"]
 
-    raise FileNotFoundError(f"未找到 safetensors 文件: {model_path}")
+    raise FileNotFoundError(f"No safetensors files found: {model_path}")
 
 
-# ==================== 核心：流式权重处理 ====================
+# ==================== Core: streaming weight processing ====================
 
 def process_weights_streaming(
     source_model_path: str,
@@ -273,57 +273,57 @@ def process_weights_streaming(
     num_layers: int,
     verbose: bool = True
 ) -> int:
-    """流式处理权重（内存优化版本，单源模型 PLE 专用）
+    """Process weights in a streaming fashion (memory-optimized, single-source PLE only)
 
-    策略：
-    - 逐个读取源模型分片
-    - 非 MLP 权重直接复制（共享层）
-    - MLP 权重同时复制到 Expert 0 和 Expert 1（相同初始化）
-    - 按分片大小限制写入输出文件
+    Strategy:
+    - Read the source model shards one by one
+    - Non-MLP weights are copied directly (shared layers)
+    - MLP weights are copied to both Expert 0 and Expert 1 (identical initialization)
+    - Write output files according to the shard size limit
 
     Args:
-        source_model_path: 源模型路径（Qwen2.5-7B-Instruct）
-        output_path: 输出路径
-        num_layers: 模型层数
-        verbose: 是否输出详细日志
+        source_model_path: source model path (e.g. Qwen2.5-7B-Instruct)
+        output_path: output path
+        num_layers: number of model layers
+        verbose: whether to print detailed logs
 
     Returns:
-        copied_count: 复制的参数数量
+        copied_count: number of parameters copied
     """
     from safetensors import safe_open
     from safetensors.torch import save_file
 
     print(f"\n{'='*60}")
-    print("流式处理权重（单源模型，两个 Expert 相同初始化）")
+    print("Streaming weight processing (single source model, both experts initialized identically)")
     print(f"{'='*60}")
 
     source_shards = get_shard_files(source_model_path)
-    print(f"\n源模型分片: {len(source_shards)} 个")
+    print(f"\nSource model shards: {len(source_shards)}")
 
-    # 使用临时目录存储中间结果
+    # Use a temporary directory for intermediate results
     temp_dir = tempfile.mkdtemp(prefix="ple_weights_")
-    print(f"临时目录: {temp_dir}")
+    print(f"Temporary directory: {temp_dir}")
 
-    # MLP 权重匹配正则
-    # gate_proj/up_proj/down_proj: Qwen2/Qwen3/LLaMA（3 个 MLP 权重/层）
-    # gate_up_proj/down_proj: Phi3/Phi-4-mini（融合 gate+up，2 个 MLP 权重/层）
+    # Regex for matching MLP weights
+    # gate_proj/up_proj/down_proj: Qwen2/Qwen3/LLaMA (3 MLP weights per layer)
+    # gate_up_proj/down_proj: Phi3/Phi-4-mini (fused gate+up, 2 MLP weights per layer)
     mlp_pattern = re.compile(
         r'model\.layers\.(\d+)\.mlp\.(gate_proj|up_proj|down_proj|gate_up_proj)\.weight'
     )
 
-    # 输出分片管理
+    # Output shard management
     weight_map = {}
     total_size = 0
     copied_count = 0
     output_shard_idx = 1
 
-    # 分片大小限制 (5GB)
+    # Shard size limit (5GB)
     SHARD_SIZE_LIMIT = 5 * 1024 * 1024 * 1024
     current_shard = {}
     current_shard_size = 0
 
     def save_current_shard():
-        """保存当前分片到临时目录"""
+        """Save the current shard to the temporary directory"""
         nonlocal output_shard_idx, current_shard, current_shard_size, weight_map, total_size
         if not current_shard:
             return
@@ -336,8 +336,8 @@ def process_weights_streaming(
             weight_map[k] = shard_name
 
         total_size += current_shard_size
-        print(f"    💾 保存分片 {output_shard_idx}: "
-              f"{current_shard_size / 1e9:.2f} GB, {len(current_shard)} 个参数")
+        print(f"    💾 Saving shard {output_shard_idx}: "
+              f"{current_shard_size / 1e9:.2f} GB, {len(current_shard)} parameters")
 
         output_shard_idx += 1
         current_shard = {}
@@ -345,7 +345,7 @@ def process_weights_streaming(
         gc.collect()
 
     def add_weight(key: str, tensor: torch.Tensor):
-        """添加权重到当前分片（自动分片）"""
+        """Add a weight to the current shard (shards automatically)"""
         nonlocal current_shard, current_shard_size
         tensor_size = tensor.numel() * tensor.element_size()
 
@@ -355,13 +355,13 @@ def process_weights_streaming(
         current_shard[key] = tensor
         current_shard_size += tensor_size
 
-    # ========== 处理源模型权重 ==========
-    print(f"\n处理源模型权重...")
-    print(f"  - 非 MLP 权重: 直接复制（共享层）")
-    print(f"  - MLP 权重: 同时复制到 Expert 0 和 Expert 1（相同初始化）")
+    # ========== Process the source model weights ==========
+    print(f"\nProcessing source model weights...")
+    print(f"  - Non-MLP weights: copied directly (shared layers)")
+    print(f"  - MLP weights: copied to both Expert 0 and Expert 1 (identical initialization)")
 
     for shard_idx, shard_file in enumerate(source_shards):
-        print(f"\n  📂 分片 {shard_idx + 1}/{len(source_shards)}: {shard_file}")
+        print(f"\n  📂 Shard {shard_idx + 1}/{len(source_shards)}: {shard_file}")
         shard_path = os.path.join(source_model_path, shard_file)
 
         with safe_open(shard_path, framework="pt", device="cpu") as f:
@@ -371,7 +371,7 @@ def process_weights_streaming(
                 mlp_match = mlp_pattern.match(key)
 
                 if mlp_match:
-                    # MLP 权重 → 同时复制到 Expert 0 和 Expert 1
+                    # MLP weights -> copied to both Expert 0 and Expert 1
                     layer_idx = mlp_match.group(1)
                     proj_type = mlp_match.group(2)
 
@@ -379,13 +379,13 @@ def process_weights_streaming(
                     key_e1 = f'model.layers.{layer_idx}.mlp.experts.1.{proj_type}.weight'
 
                     add_weight(key_e0, tensor)
-                    add_weight(key_e1, tensor.clone())  # clone 避免共享存储
+                    add_weight(key_e1, tensor.clone())  # clone to avoid shared storage
                     copied_count += 2
 
                     if verbose:
                         print(f"    [E0+E1] {key} → experts.0 + experts.1  shape={list(tensor.shape)}")
                 else:
-                    # 非 MLP 权重：直接复制
+                    # Non-MLP weights: copy directly
                     add_weight(key, tensor)
                     copied_count += 1
 
@@ -394,14 +394,14 @@ def process_weights_streaming(
 
         gc.collect()
 
-    # 保存最后一个分片
+    # Save the last shard
     save_current_shard()
 
-    print(f"\n  ✅ 权重处理完成: 共 {copied_count} 个参数张量")
+    print(f"\n  ✅ Weight processing done: {copied_count} parameter tensors in total")
 
-    # ========== 移动文件到输出目录 ==========
+    # ========== Move files to the output directory ==========
     print(f"\n{'='*60}")
-    print("移动文件到输出目录")
+    print("Moving files to the output directory")
     print(f"{'='*60}")
 
     total_shards = output_shard_idx - 1
@@ -422,7 +422,7 @@ def process_weights_streaming(
             if v == old_name:
                 weight_map[k] = new_name
 
-    # 保存索引文件
+    # Save the index file
     index = {
         "metadata": {"total_size": total_size},
         "weight_map": weight_map
@@ -439,159 +439,159 @@ def process_weights_streaming(
     return copied_count
 
 
-# ==================== 验证函数 ====================
+# ==================== Verification ====================
 
 def verify_output(output_path: str, num_layers: int, model_family: str):
-    """验证输出模型的基本完整性
+    """Verify the basic integrity of the output model
 
     Args:
-        output_path: 输出模型路径
-        num_layers: 模型层数
-        model_family: 模型族（"qwen2" 或 "qwen3"）
+        output_path: output model path
+        num_layers: number of model layers
+        model_family: model family ("qwen2" or "qwen3")
     """
     family_config = MODEL_FAMILY_CONFIG[model_family]
 
     print(f"\n{'='*60}")
-    print(f"验证输出模型完整性（模型族: {model_family}）")
+    print(f"Verifying output model integrity (model family: {model_family})")
     print(f"{'='*60}")
 
     required_files = ['config.json', 'model.safetensors.index.json']
     for f in required_files:
         path = os.path.join(output_path, f)
-        assert os.path.exists(path), f"缺少文件: {f}"
-        print(f"  ✅ {f} 存在")
+        assert os.path.exists(path), f"Missing file: {f}"
+        print(f"  ✅ {f} exists")
 
     with open(os.path.join(output_path, "model.safetensors.index.json"), 'r') as f:
         index = json.load(f)
 
     weight_keys = sorted(index['weight_map'].keys())
 
-    # 每层权重数根据模型族不同：
-    # - qwen2: 15（attn 7 + layernorm 2 + expert MLP 6）
-    # - qwen3: 14（attn 4 + q/k_norm 2 + layernorm 2 + expert MLP 6）
-    # 全局权重: embed_tokens + norm = 2（若 tie_word_embeddings=false 则 +1 lm_head）
+    # Per-layer weight count depends on the model family:
+    # - qwen2: 15 (attn 7 + layernorm 2 + expert MLP 6)
+    # - qwen3: 14 (attn 4 + q/k_norm 2 + layernorm 2 + expert MLP 6)
+    # Global weights: embed_tokens + norm = 2 (+1 lm_head if tie_word_embeddings=false)
     expected_per_layer = family_config["expected_per_layer"]
     has_lm_head = any('lm_head' in k for k in weight_keys)
     num_global = 3 if has_lm_head else 2
     expected_total = expected_per_layer * num_layers + num_global
 
-    print(f"  - 权重数量: {len(weight_keys)} (预期: {expected_total})")
-    print(f"  - 每层预期: {expected_per_layer} 个权重")
-    print(f"  - 全局权重: {num_global} 个 ({'含 lm_head' if has_lm_head else 'tie_word_embeddings, 无 lm_head'})")
+    print(f"  - Number of weights: {len(weight_keys)} (expected: {expected_total})")
+    print(f"  - Expected per layer: {expected_per_layer} weights")
+    print(f"  - Global weights: {num_global} ({'with lm_head' if has_lm_head else 'tie_word_embeddings, no lm_head'})")
 
-    # 检查无 gate 权重
+    # Check that there are no gate weights
     gate_keys = [k for k in weight_keys if 'gate.weight' in k and 'gate_proj' not in k]
     if gate_keys:
-        print(f"  ❌ 发现异常 gate 权重: {gate_keys}")
+        print(f"  ❌ Unexpected gate weights found: {gate_keys}")
     else:
-        print(f"  ✅ 无 gate/router 权重（符合 PLE 设计）")
+        print(f"  ✅ No gate/router weights (matches the PLE design)")
 
-    # 检查 expert 结构完整
+    # Check that the expert structure is complete
     expert0_keys = [k for k in weight_keys if '.experts.0.' in k]
     expert1_keys = [k for k in weight_keys if '.experts.1.' in k]
-    # MLP 权重数/层: Qwen/LLaMA = 3 (gate_proj, up_proj, down_proj), Phi = 2 (gate_up_proj, down_proj)
+    # MLP weights per layer: Qwen/LLaMA = 3 (gate_proj, up_proj, down_proj), Phi = 2 (gate_up_proj, down_proj)
     mlp_weights_per_layer = (expected_per_layer - len([
         k for k in weight_keys
         if 'layers.0.' in k and '.experts.' not in k
-    ])) // 2  # 除以 2 因为有两个 expert
+    ])) // 2  # divide by 2 because there are two experts
     expected_expert_keys = num_layers * mlp_weights_per_layer
 
-    print(f"  - Expert 0 权重数: {len(expert0_keys)} (预期: {expected_expert_keys})")
-    print(f"  - Expert 1 权重数: {len(expert1_keys)} (预期: {expected_expert_keys})")
+    print(f"  - Expert 0 weights: {len(expert0_keys)} (expected: {expected_expert_keys})")
+    print(f"  - Expert 1 weights: {len(expert1_keys)} (expected: {expected_expert_keys})")
 
     assert len(expert0_keys) == expected_expert_keys
     assert len(expert1_keys) == expected_expert_keys
     assert len(weight_keys) == expected_total
 
-    print(f"\n✅ 输出模型验证通过")
+    print(f"\n✅ Output model verification passed")
 
 
-# ==================== 主函数 ====================
+# ==================== Main ====================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="将源模型权重复制到 PLE 模型（两个 Expert 相同初始化，支持 Qwen2/Qwen3）",
+        description="Copy source-model weights into a PLE model (both experts initialized identically, supports Qwen2/Qwen3)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
-    # Qwen2（自动检测模型族）
+Examples:
+    # Qwen2 (model family auto-detected)
     python -m src.utils.copy_weights_to_ple \\
         --source_model_path ./models/source/Qwen2.5-7B-Instruct \\
         --output_path ./models/ple_initialized
 
-    # Qwen3（自动检测模型族）
+    # Qwen3 (model family auto-detected)
     python -m src.utils.copy_weights_to_ple \\
         --source_model_path ./models/source/Qwen3-4B-Instruct-2507 \\
         --output_path ./models/qwen3_4b_instruct_ple_initialized
 
-    # 手动指定模型族（可选）
+    # Specify the model family manually (optional)
     python -m src.utils.copy_weights_to_ple \\
         --source_model_path ./models/source/Qwen3-4B-Instruct-2507 \\
         --output_path ./models/qwen3_4b_instruct_ple_initialized \\
         --model_family qwen3
 
-两个 Expert 使用相同的源模型初始化，SFT 过程中会自然分化。
+Both experts are initialized from the same source model and diverge naturally during SFT.
         """
     )
 
     parser.add_argument(
         "--source_model_path", type=str, required=True,
-        help="源模型路径（用于共享层 + Expert 0/1 MLP），如 Qwen2.5-7B-Instruct 或 Qwen3-4B-Instruct-2507"
+        help="Source model path (used for shared layers + Expert 0/1 MLP), e.g. Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507"
     )
     parser.add_argument(
         "--output_path", type=str, default="./models/ple_initialized",
-        help="输出模型路径 (默认: ./models/ple_initialized)"
+        help="Output model path (default: ./models/ple_initialized)"
     )
     parser.add_argument(
         "--model_family", type=str, default=None, choices=["qwen2", "qwen3", "llama"],
-        help="模型族（默认: 从源模型 config.json 的 model_type 自动检测）"
+        help="Model family (default: auto-detected from model_type in the source config.json)"
     )
     parser.add_argument(
         "--verbose", action="store_true", default=False,
-        help="输出详细日志（每个权重的复制信息）"
+        help="Print detailed logs (copy info for every weight)"
     )
 
     args = parser.parse_args()
 
-    # 步骤 1: 读取源模型配置
+    # Step 1: read the source model config
     config_path = os.path.join(args.source_model_path, "config.json")
     with open(config_path, 'r') as f:
         source_config = json.load(f)
 
-    # 步骤 1.5: 检测或验证模型族
+    # Step 1.5: detect or validate the model family
     if args.model_family is not None:
         model_family = args.model_family
     else:
         model_family = detect_model_family(source_config)
 
     print("\n" + "="*60)
-    print(f"PLE 权重复制工具（模型族: {model_family}）")
+    print(f"PLE weight-copy tool (model family: {model_family})")
     print("="*60)
-    print(f"\n源模型路径: {args.source_model_path}")
-    print(f"输出路径:   {args.output_path}")
-    print(f"模型族:     {model_family}")
-    print(f"\n策略: Expert 0 和 Expert 1 均从同一源模型初始化")
+    print(f"\nSource model path: {args.source_model_path}")
+    print(f"Output path:       {args.output_path}")
+    print(f"Model family:      {model_family}")
+    print(f"\nStrategy: Expert 0 and Expert 1 are both initialized from the same source model")
 
     num_layers = source_config['num_hidden_layers']
-    print(f"\n源模型参数:")
+    print(f"\nSource model parameters:")
     for p in ['model_type', 'hidden_size', 'intermediate_size', 'num_hidden_layers',
               'num_attention_heads', 'vocab_size']:
         print(f"  {p}: {source_config.get(p)}")
 
-    # 步骤 2: 清理旧的输出目录中的 safetensors 文件
+    # Step 2: remove old safetensors files from the output directory
     if os.path.exists(args.output_path):
         for f in os.listdir(args.output_path):
             if f.endswith('.safetensors'):
                 os.remove(os.path.join(args.output_path, f))
-                print(f"  🗑️ 删除旧分片: {f}")
+                print(f"  🗑️ Removing old shard: {f}")
 
-    # 步骤 3: 创建 PLE 配置
+    # Step 3: create the PLE config
     create_ple_config(source_config, args.output_path, model_family)
 
-    # 步骤 4: 复制辅助文件
+    # Step 4: copy auxiliary files
     copy_auxiliary_files(args.source_model_path, args.output_path, model_family)
 
-    # 步骤 5: 流式处理权重
+    # Step 5: process the weights in a streaming fashion
     copied_count = process_weights_streaming(
         args.source_model_path,
         args.output_path,
@@ -599,26 +599,26 @@ def main():
         args.verbose
     )
 
-    # 步骤 6: 验证输出
+    # Step 6: verify the output
     verify_output(args.output_path, num_layers, model_family)
 
-    # 步骤 7: 输出统计
+    # Step 7: print statistics
     family_config = MODEL_FAMILY_CONFIG[model_family]
     print(f"\n{'='*60}")
-    print("PLE 权重复制完成！")
+    print("PLE weight copy done!")
     print(f"{'='*60}")
-    print(f"  - 模型族: {model_family}")
-    print(f"  - 源模型: {args.source_model_path}")
-    print(f"  - PLE 类型: {family_config['model_type']}")
-    print(f"  - Expert 0 (no_think): 来自源模型 MLP")
-    print(f"  - Expert 1 (think):    来自源模型 MLP（与 Expert 0 相同）")
-    print(f"  - 共享层:              来自源模型 (embed, attn, norm, lm_head)")
-    print(f"  - Gate/Router:         无 (PLE 路由由控制 token 决定)")
-    print(f"  - 总计:                {copied_count} 个权重张量")
+    print(f"  - Model family: {model_family}")
+    print(f"  - Source model: {args.source_model_path}")
+    print(f"  - PLE type: {family_config['model_type']}")
+    print(f"  - Expert 0 (no_think): from the source model MLP")
+    print(f"  - Expert 1 (think):    from the source model MLP (same as Expert 0)")
+    print(f"  - Shared layers:       from the source model (embed, attn, norm, lm_head)")
+    print(f"  - Gate/Router:         none (PLE routing is decided by the control tokens)")
+    print(f"  - Total:               {copied_count} weight tensors")
 
-    print(f"\n下一步：")
-    print(f"  1. 注册控制 token: python -m src.utils.register_control_tokens --model_path {args.output_path}")
-    print(f"  2. 运行测试验证权重一致性")
+    print(f"\nNext steps:")
+    print(f"  1. Register control tokens: python -m src.utils.register_control_tokens --model_path {args.output_path}")
+    print(f"  2. Run tests to verify weight consistency")
 
 
 if __name__ == "__main__":

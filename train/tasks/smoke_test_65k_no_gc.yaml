@@ -1,5 +1,5 @@
 ### Smoke Test: cutoff_len=65536, gradient_checkpointing=OFF
-### 目的: 测量 Qwen3-4B PLE 在 65K 序列长度下无 GC 的峰值显存
+### Purpose: measure peak GPU memory of Qwen3-4B PLE at 65K sequence length without gradient checkpointing
 
 ### model
 model_name_or_path: models/qwen3_4b_ple_initialized

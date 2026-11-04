@@ -1,12 +1,12 @@
 """
-Ablation Study: Base model weight comparison (tab:ablation_base_superior_27k_27k).
+Ablation Study: Base model weight comparison.
 Each (benchmark x metric) saved as a standalone figure.
 X-axis grouped by mode (Think / No-think), bars represent base models.
 Color by mode: blue=Think, green=No-think.
-Model distinction: color saturation (HSL) + hatch pattern (方案C).
-  - Qwen3-4B:        高饱和度 + 实心 (主角)
-  - Qwen3-4B Base:   低饱和度 + 斜线 ///
-  - Qwen2.5-7B Inst: 中饱和度 + 点阵 ..
+Model distinction: color saturation (HSL) + hatch pattern.
+  - Qwen3-4B:        high saturation + solid fill (ours)
+  - Qwen3-4B Base:   low saturation + diagonal hatch ///
+  - Qwen2.5-7B Inst: medium saturation + dots ..
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -17,7 +17,7 @@ from matplotlib.transforms import blended_transform_factory
 import colorsys
 import os
 
-# ── HSL 调色工具 ──
+# ── HSL color helpers ──
 def hex_to_hsl(hex_color):
     """hex → HSL (H: 0-360, S: 0-1, L: 0-1)"""
     h = hex_color.lstrip("#")
@@ -32,26 +32,26 @@ def hsl_to_hex(h, s, l):
     return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
 
 def adjust_saturation(hex_color, sat_ratio):
-    """调整颜色的饱和度 (sat_ratio=1.0 不变, <1 降低饱和度), 保持色相和明度不变"""
+    """Scale a color's saturation (sat_ratio=1.0 keeps it, <1 desaturates), keeping hue and lightness unchanged."""
     h, s, l = hex_to_hsl(hex_color)
     s_new = s * sat_ratio
     return hsl_to_hex(h, s_new, l)
 
-# ── 基准颜色 ──
-DEEP_BLUE  = "#1B3A5C"   # Think 色 (高饱和)
-DEEP_GREEN = "#1B5E20"   # No-think 色 (高饱和)
+# ── Base colors ──
+DEEP_BLUE  = "#1B3A5C"   # Think color (high saturation)
+DEEP_GREEN = "#1B5E20"   # No-think color (high saturation)
 
-# ── 每个模型的视觉样式: (饱和度比例, hatch, alpha) ──
-# Qwen3-4B: 主角 — 高饱和, 实心
-# Qwen3-4B Base: 低饱和, 斜线
-# Qwen2.5-7B Inst.: 中饱和, 点阵
+# ── Visual style per model: (saturation ratio, hatch, alpha) ──
+# Qwen3-4B: ours, high saturation, solid fill
+# Qwen3-4B Base: low saturation, diagonal hatch
+# Qwen2.5-7B Inst.: medium saturation, dots
 MODEL_STYLE = {
     "Qwen3-4B Base":    {"sat": 0.30, "hatch": "///",  "alpha": 0.85},
     "Qwen3-4B":         {"sat": 1.00, "hatch": None,   "alpha": 1.00},
     "Qwen2.5-7B Inst.": {"sat": 0.60, "hatch": "..",   "alpha": 0.85},
 }
 
-# 模型顺序 (X 轴 bar 顺序)
+# Model order (bar order on the X axis)
 MODELS = ["Qwen3-4B", "Qwen3-4B Base", "Qwen2.5-7B Inst."]
 
 plt.rcParams.update({
@@ -67,7 +67,7 @@ plt.rcParams.update({
     "hatch.linewidth": 1.5,
 })
 
-# ── 数据: tab:ablation_base_superior_27k_27k (忽略 Qwen3-4B-Instruct) ──
+# ── Data (Qwen3-4B-Instruct is ignored) ──
 DATA_ACC = {
     "Qwen3-4B Base":        {"MATH500": (90.00, 74.00), "AIME24": (20.00, 30.00)},
     "Qwen3-4B":             {"MATH500": (94.80, 80.80), "AIME24": (60.00, 40.00)},
@@ -111,22 +111,22 @@ for metric_key, minfo in METRIC_INFO.items():
         gap_within = 0.15
         group_gap = 0.8
 
-        # Think 组 X 坐标
+        # X positions of the Think group
         think_xs = np.arange(n_models) * (bw + gap_within)
         think_center = think_xs.mean()
 
-        # No-think 组 X 坐标
+        # X positions of the No-think group
         nothink_start = think_xs[-1] + bw + group_gap
         nothink_xs = nothink_start + np.arange(n_models) * (bw + gap_within)
         nothink_center = nothink_xs.mean()
 
-        # 收集所有有效数值用于 Y 轴范围
+        # Collect all valid values to determine the Y axis range
         think_vals = [DATA[m][bm][0] for m in MODELS]
         nothink_vals = [DATA[m][bm][1] for m in MODELS]
         all_v = [v for v in think_vals + nothink_vals if v is not None]
         ymax_data = max(all_v) if all_v else 100
 
-        # ── Y 轴设置 ──
+        # ── Y axis settings ──
         if metric_key == "refl":
             ax.set_yscale("symlog", linthresh=0.01, linscale=0.5)
             ymax = ymax_data * 4.0
@@ -140,7 +140,7 @@ for metric_key, minfo in METRIC_INFO.items():
         trans_val = blended_transform_factory(ax.transData, ax.transAxes)
 
         def _bar_label(x_pos, val, fmt):
-            """在 bar 顶部紧贴放置数值标签"""
+            """Place the value label right above the bar top."""
             if metric_key == "refl" and val == 0:
                 ax.text(x_pos, 0.06, "0", transform=trans_val,
                         ha="center", va="bottom", fontsize=12, color="#222", fontweight="bold")
@@ -151,7 +151,7 @@ for metric_key, minfo in METRIC_INFO.items():
                     ha="center", va="bottom", fontsize=12, color="#222", fontweight="bold")
 
         def _draw_bar(x_pos, val, base_color, model_name):
-            """画一个 bar, 根据模型应用对应的饱和度和纹理"""
+            """Draw one bar, applying the saturation and hatch of the corresponding model."""
             style = MODEL_STYLE[model_name]
             color = adjust_saturation(base_color, style["sat"])
             if val is not None:
@@ -163,21 +163,21 @@ for metric_key, minfo in METRIC_INFO.items():
                 ax.text(x_pos, 0.02, "N/A", transform=trans_val,
                         ha="center", va="bottom", fontsize=10, color="#999", fontstyle="italic")
 
-        # ── 画 Think 组 (蓝色系) ──
+        # ── Draw the Think group (blue tones) ──
         for i, m in enumerate(MODELS):
             _draw_bar(think_xs[i], think_vals[i], DEEP_BLUE, m)
 
-        # ── 画 No-think 组 (绿色系) ──
+        # ── Draw the No-think group (green tones) ──
         for i, m in enumerate(MODELS):
             _draw_bar(nothink_xs[i], nothink_vals[i], DEEP_GREEN, m)
 
-        # ── X 轴标签 ──
+        # ── X axis labels ──
         all_xs = list(think_xs) + list(nothink_xs)
         all_labels = list(MODELS) + list(MODELS)
         ax.set_xticks(all_xs)
         ax.set_xticklabels(all_labels, fontsize=11, rotation=35, ha="right", rotation_mode="anchor")
 
-        # 分组标签
+        # Group labels
         trans = ax.get_xaxis_transform()
         ax.text(think_center, -0.28, "Think", transform=trans,
                 ha="center", va="top", fontsize=15, fontweight="bold", color="#2B4C7E")
@@ -189,9 +189,9 @@ for metric_key, minfo in METRIC_INFO.items():
         ax.set_axisbelow(True)
         ax.tick_params(axis="both", length=3, width=0.5)
 
-        # ── Legend (只在 refl 图中显示) ──
+        # ── Legend (shown only in refl plots) ──
         if metric_key == "refl":
-            # 用实际颜色构建 legend, 展示模型 + 模式的组合
+            # Build the legend from the actual colors, showing model + mode combinations
             legend_handles = [
                 Patch(fc=adjust_saturation(DEEP_BLUE, 0.30), ec="w", hatch="///",
                       label="Qwen3-4B Base"),

@@ -1,5 +1,5 @@
 ### Smoke Test: 4×GPU, cutoff_len=65536, GC ON, ZeRO-3
-### 目的: 替代测试 — 验证 ZeRO-3 是否兼容 PLE 模型架构 (预期可能报错)
+### Purpose: check whether ZeRO-3 is compatible with the PLE architecture (an error is possible)
 
 ### model
 model_name_or_path: models/qwen3_4b_ple_initialized

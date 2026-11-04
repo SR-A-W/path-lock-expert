@@ -1,8 +1,7 @@
-"""PLE 模型基本功能测试：配置、创建、前向传播、路由逻辑、generate 路由缓存。
+"""Basic PLE model tests: config, construction, forward pass, routing logic, routing cache in generate.
 
-运行方式:
+Usage:
     cd ./
-    conda activate het
     python -m pytest src/tests/test_ple_basic.py -v -s
 """
 
@@ -11,7 +10,7 @@ import os
 import torch
 import pytest
 
-# 将 transformers submodule 的 src 加入 path，优先于 pip 安装的 transformers
+# Put the transformers submodule's src on sys.path so it takes precedence over the pip-installed transformers
 TRANSFORMERS_SRC = os.path.join(
     os.path.dirname(__file__), "..", "transformers", "src"
 )
@@ -28,12 +27,12 @@ from transformers.models.qwen2_ple.modeling_qwen2_ple import (
 )
 
 
-# ---------- 小型测试用配置（不需要大显存） ----------
+# ---------- Small test config (no large GPU memory needed) ----------
 THINK_ID = 42
 NO_THINK_ID = 43
 
 def _tiny_config(think_token_id=THINK_ID, no_think_token_id=NO_THINK_ID, default_routing_index=1):
-    """创建一个极小的 PLE 配置，用于快速 CPU 测试。"""
+    """Build a tiny PLE config for fast CPU tests."""
     return Qwen2PleConfig(
         vocab_size=256,
         hidden_size=64,
@@ -48,10 +47,10 @@ def _tiny_config(think_token_id=THINK_ID, no_think_token_id=NO_THINK_ID, default
     )
 
 
-# ===================== 配置测试 =====================
+# ===================== Config tests =====================
 class TestConfig:
     def test_model_type(self):
-        """验证 model_type 是 qwen2_ple"""
+        """model_type is qwen2_ple."""
         config = _tiny_config()
         assert config.model_type == "qwen2_ple"
 
@@ -64,7 +63,7 @@ class TestConfig:
         assert config.no_think_token_id == 43
 
     def test_default_routing_index(self):
-        """默认路由是 1（think 模式）"""
+        """The default routing is 1 (think mode)."""
         config = _tiny_config()
         assert config.default_routing_index == 1
 
@@ -73,74 +72,74 @@ class TestConfig:
         assert config.default_routing_index == 0
 
 
-# ===================== 路由判断函数测试 =====================
+# ===================== Routing-function tests =====================
 class TestDetermineRouting:
     def test_only_think_token(self):
-        """只包含 think token → routing_index = 1"""
+        """Only a think token -> routing_index = 1."""
         config = _tiny_config()
         ids = torch.tensor([[1, 2, THINK_ID, 3, 4]])
         assert _determine_routing_index(ids, config) == 1
 
     def test_only_no_think_token(self):
-        """只包含 no_think token → routing_index = 0"""
+        """Only a no_think token -> routing_index = 0."""
         config = _tiny_config()
         ids = torch.tensor([[1, 2, NO_THINK_ID, 3, 4]])
         assert _determine_routing_index(ids, config) == 0
 
     def test_no_control_token(self):
-        """无控制 token → 使用 default_routing_index (默认 1)"""
+        """No control token -> use default_routing_index (default 1)."""
         config = _tiny_config()
         ids = torch.tensor([[1, 2, 3, 4, 5]])
         assert _determine_routing_index(ids, config) == 1  # default=1 (think)
 
     def test_no_control_token_custom_default(self):
-        """自定义 default=0 时无控制 token → 返回 0"""
+        """Custom default=0 and no control token -> returns 0."""
         config = _tiny_config(default_routing_index=0)
         ids = torch.tensor([[1, 2, 3, 4, 5]])
         assert _determine_routing_index(ids, config) == 0
 
     def test_both_tokens_think_last(self):
-        """同时包含两种 token，think 在后 → routing_index = 1"""
+        """Both tokens present, think last -> routing_index = 1."""
         config = _tiny_config()
         ids = torch.tensor([[1, NO_THINK_ID, 2, THINK_ID, 3]])
         assert _determine_routing_index(ids, config) == 1
 
     def test_both_tokens_no_think_last(self):
-        """同时包含两种 token，no_think 在后 → routing_index = 0（防注入）"""
+        """Both tokens present, no_think last -> routing_index = 0 (injection defense)."""
         config = _tiny_config()
         ids = torch.tensor([[1, THINK_ID, 2, NO_THINK_ID, 3]])
         assert _determine_routing_index(ids, config) == 0
 
     def test_injection_defense(self):
-        """模拟注入防御：用户在前面插入了 think token，但系统在后面放了 no_think token"""
+        """Injection defense: the user inserted a think token early, but the system placed a no_think token later."""
         config = _tiny_config()
-        # 序列：[bos, user_think_injection, ..., system_no_think_control]
+        # Sequence: [bos, user_think_injection, ..., system_no_think_control]
         ids = torch.tensor([[1, THINK_ID, 10, 11, 12, NO_THINK_ID]])
-        assert _determine_routing_index(ids, config) == 0  # 最后的 no_think 覆盖注入
+        assert _determine_routing_index(ids, config) == 0  # the final no_think overrides the injected think
 
     def test_no_token_ids_configured(self):
-        """未配置任何 token ID → 直接返回 default"""
+        """No token IDs configured -> returns the default directly."""
         config = _tiny_config(think_token_id=None, no_think_token_id=None, default_routing_index=1)
         ids = torch.tensor([[1, 2, 3]])
         assert _determine_routing_index(ids, config) == 1
 
     def test_only_think_id_configured_not_found(self):
-        """只配置了 think_token_id 但 input_ids 中没有 → default"""
+        """Only think_token_id configured and absent from input_ids -> default."""
         config = _tiny_config(think_token_id=THINK_ID, no_think_token_id=None, default_routing_index=1)
         ids = torch.tensor([[1, 2, 3]])
-        assert _determine_routing_index(ids, config) == 1  # 未找到 → default
+        assert _determine_routing_index(ids, config) == 1  # not found -> default
 
     def test_only_think_id_configured_found(self):
-        """只配置了 think_token_id 且找到 → 1"""
+        """Only think_token_id configured and present -> 1."""
         config = _tiny_config(think_token_id=THINK_ID, no_think_token_id=None)
         ids = torch.tensor([[1, THINK_ID, 3]])
         assert _determine_routing_index(ids, config) == 1
 
 
-# ===================== MLP 测试 =====================
+# ===================== MLP tests =====================
 class TestMLP:
     def test_expert_mlp_output_shape(self):
-        """单个 Expert MLP 的输出形状正确"""
+        """A single expert MLP produces the correct output shape."""
         config = _tiny_config()
         mlp = Qwen2PleExpertMLP(config)
         x = torch.randn(2, 8, 64)
@@ -148,14 +147,14 @@ class TestMLP:
         assert out.shape == (2, 8, 64)
 
     def test_ple_mlp_routing(self):
-        """PLE MLP 容器中两个 expert 的权重不同，路由到不同 expert 产生不同输出。"""
+        """The two experts in the PLE MLP container have different weights, so routing to different experts gives different outputs."""
         config = _tiny_config()
         mlp = Qwen2PleMLP(config)
         x = torch.randn(2, 8, 64)
         out0 = mlp(x, routing_index=0)
         out1 = mlp(x, routing_index=1)
         assert out0.shape == out1.shape == (2, 8, 64)
-        assert not torch.allclose(out0, out1), "两个 expert 输出不应完全一致"
+        assert not torch.allclose(out0, out1), "The two experts' outputs should not be identical"
 
     def test_ple_mlp_has_two_experts(self):
         config = _tiny_config()
@@ -163,7 +162,7 @@ class TestMLP:
         assert len(mlp.experts) == 2
 
 
-# ===================== Decoder Layer 测试 =====================
+# ===================== Decoder layer tests =====================
 class TestDecoderLayer:
     def _make_layer(self):
         config = _tiny_config()
@@ -185,10 +184,10 @@ class TestDecoderLayer:
         sin = torch.zeros(1, 8, 16)
         out0 = layer(x, position_embeddings=(cos, sin), routing_index=0)
         out1 = layer(x, position_embeddings=(cos, sin), routing_index=1)
-        assert not torch.allclose(out0, out1), "不同 expert 路由应产生不同输出"
+        assert not torch.allclose(out0, out1), "Routing to different experts should produce different outputs"
 
 
-# ===================== Model 测试 =====================
+# ===================== Model tests =====================
 class TestModel:
     def test_model_creation(self):
         config = _tiny_config()
@@ -198,7 +197,7 @@ class TestModel:
             assert isinstance(layer.mlp, Qwen2PleMLP)
 
     def test_forward_with_think(self):
-        """包含 think token → routing_index=1"""
+        """Contains a think token -> routing_index=1."""
         config = _tiny_config()
         model = Qwen2PleModel(config).eval()
         input_ids = torch.tensor([[1, THINK_ID, 3, 4, 5]])
@@ -206,7 +205,7 @@ class TestModel:
         assert output.last_hidden_state.shape == (1, 5, 64)
 
     def test_forward_with_no_think(self):
-        """包含 no_think token → routing_index=0"""
+        """Contains a no_think token -> routing_index=0."""
         config = _tiny_config()
         model = Qwen2PleModel(config).eval()
         input_ids = torch.tensor([[1, NO_THINK_ID, 3, 4, 5]])
@@ -214,21 +213,21 @@ class TestModel:
         assert output.last_hidden_state.shape == (1, 5, 64)
 
     def test_forward_no_control_token_defaults_to_think(self):
-        """无控制 token → 默认走 think (expert 1)，通过显式传 routing_index 验证"""
+        """No control token -> defaults to think (expert 1); verified by passing routing_index explicitly."""
         config = _tiny_config()
         model = Qwen2PleModel(config).eval()
-        # 使用相同的 input_ids，只改变路由方式
-        ids = torch.tensor([[1, 2, 3, 4, 5]])  # 不含任何控制 token
+        # Same input_ids; only the way routing is chosen changes
+        ids = torch.tensor([[1, 2, 3, 4, 5]])  # contains no control token
         with torch.no_grad():
-            # 不传 routing_index → 应自动使用 default_routing_index=1 (think)
+            # No routing_index -> default_routing_index=1 (think) should be used automatically
             out_default = model(input_ids=ids).last_hidden_state
-            # 显式传 routing_index=1 → 手动指定 think
+            # Explicit routing_index=1 -> think selected manually
             out_explicit_think = model(input_ids=ids, routing_index=1).last_hidden_state
-        # 两者应完全一致：默认路由 = 显式 think
-        assert torch.allclose(out_default, out_explicit_think), "default 应与显式 routing_index=1 一致"
+        # The two must be identical: default routing == explicit think
+        assert torch.allclose(out_default, out_explicit_think), "default should match explicit routing_index=1"
 
     def test_routing_differs(self):
-        """think vs no_think 路由输出不同"""
+        """think and no_think routing give different outputs."""
         config = _tiny_config()
         model = Qwen2PleModel(config).eval()
         ids_think = torch.tensor([[1, THINK_ID, 3, 4, 5]])
@@ -236,34 +235,34 @@ class TestModel:
         with torch.no_grad():
             out_think = model(input_ids=ids_think).last_hidden_state
             out_no_think = model(input_ids=ids_no_think).last_hidden_state
-        assert not torch.allclose(out_think, out_no_think), "think vs no_think 输出应不同"
+        assert not torch.allclose(out_think, out_no_think), "think and no_think outputs should differ"
 
     def test_explicit_routing_index_override(self):
-        """手动传入 routing_index 应覆盖自动检测"""
+        """An explicitly passed routing_index overrides automatic detection."""
         config = _tiny_config()
         model = Qwen2PleModel(config).eval()
-        # 使用相同的 input_ids（含 think token），只靠 routing_index 参数区分
+        # Same input_ids (containing a think token); only the routing_index argument differs
         ids = torch.tensor([[1, THINK_ID, 3, 4, 5]])
         with torch.no_grad():
-            # 自动检测 → routing_index=1 (因为有 think token)
+            # Auto-detection -> routing_index=1 (because of the think token)
             out_auto = model(input_ids=ids).last_hidden_state
-            # 手动传 routing_index=0 → 应覆盖自动检测，走 no_think
+            # Explicit routing_index=0 -> should override auto-detection and use no_think
             out_override = model(input_ids=ids, routing_index=0).last_hidden_state
-            # 手动传 routing_index=1 → 显式 think
+            # Explicit routing_index=1 -> explicit think
             out_explicit = model(input_ids=ids, routing_index=1).last_hidden_state
-        # 自动 == 显式 think
-        assert torch.allclose(out_auto, out_explicit), "自动检测应与显式 routing_index=1 一致"
-        # 覆盖 != 自动（不同 expert）
-        assert not torch.allclose(out_override, out_auto), "手动 routing_index=0 应与自动 think 不同"
+        # auto == explicit think
+        assert torch.allclose(out_auto, out_explicit), "Auto-detection should match explicit routing_index=1"
+        # override != auto (different experts)
+        assert not torch.allclose(out_override, out_auto), "Explicit routing_index=0 should differ from auto think"
 
 
-# ===================== ForCausalLM 测试 =====================
+# ===================== ForCausalLM tests =====================
 class TestForCausalLM:
     def test_creation(self):
         config = _tiny_config()
         model = Qwen2PleForCausalLM(config)
         assert model is not None
-        assert model._cached_routing_index is None  # 初始状态
+        assert model._cached_routing_index is None  # initial state
 
     def test_forward_logits(self):
         config = _tiny_config()
@@ -283,7 +282,7 @@ class TestForCausalLM:
         assert output.loss.ndim == 0
 
     def test_generate(self):
-        """generate 可以正常运行"""
+        """generate runs correctly."""
         config = _tiny_config()
         config.pad_token_id = 0
         config.eos_token_id = 255
@@ -295,26 +294,26 @@ class TestForCausalLM:
         assert gen_ids.shape[1] >= 3
 
     def test_generate_caches_routing(self):
-        """generate 过程中 routing_index 应被缓存，不因后续 token 丢失"""
+        """routing_index is cached during generate and not lost on later tokens."""
         config = _tiny_config()
         config.pad_token_id = 0
         config.eos_token_id = 255
         model = Qwen2PleForCausalLM(config).eval()
 
-        # 用含 think token 的输入 generate
+        # generate with an input containing a think token
         input_ids_think = torch.tensor([[1, THINK_ID, 3]])
         with torch.no_grad():
             model.generate(input_ids=input_ids_think, max_new_tokens=3, do_sample=False)
-        assert model._cached_routing_index == 1, "生成后应缓存 routing_index=1 (think)"
+        assert model._cached_routing_index == 1, "routing_index=1 (think) should be cached after generation"
 
-        # 用含 no_think token 的输入 generate
+        # generate with an input containing a no_think token
         input_ids_no_think = torch.tensor([[1, NO_THINK_ID, 3]])
         with torch.no_grad():
             model.generate(input_ids=input_ids_no_think, max_new_tokens=3, do_sample=False)
-        assert model._cached_routing_index == 0, "生成后应缓存 routing_index=0 (no_think)"
+        assert model._cached_routing_index == 0, "routing_index=0 (no_think) should be cached after generation"
 
     def test_generate_different_routes_differ(self):
-        """think 和 no_think 路由的 generate 输出应不同"""
+        """generate outputs for think and no_think routing should differ."""
         config = _tiny_config()
         config.pad_token_id = 0
         config.eos_token_id = 255
@@ -325,8 +324,8 @@ class TestForCausalLM:
         with torch.no_grad():
             gen_think = model.generate(input_ids=input_ids_think, max_new_tokens=5, do_sample=False)
             gen_no_think = model.generate(input_ids=input_ids_no_think, max_new_tokens=5, do_sample=False)
-        # 两条路由的生成结果不应完全一致（不同 expert 的权重不同）
-        assert not torch.equal(gen_think, gen_no_think), "think vs no_think 的 generate 输出应不同"
+        # The two routes should not generate identical results (the experts have different weights)
+        assert not torch.equal(gen_think, gen_no_think), "generate outputs for think and no_think should differ"
 
 
 if __name__ == "__main__":

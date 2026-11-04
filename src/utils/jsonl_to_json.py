@@ -1,11 +1,11 @@
 """
 JSONL to JSON Converter
 
-用法:
-  # 顺序抽取前100条
+Usage:
+  # Take the first 100 records in order
   python jsonl_to_json.py data.jsonl 100
 
-  # 随机乱序抽取100条
+  # Take 100 records at random
   python jsonl_to_json.py data.jsonl 100 --shuffle
 """
 
@@ -18,55 +18,55 @@ import sys
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert JSONL to pretty JSON file.")
-    parser.add_argument("input", type=str, help="目标 .jsonl 文件路径")
-    parser.add_argument("count", type=int, help="要转换的数据条数")
+    parser.add_argument("input", type=str, help="Path to the target .jsonl file")
+    parser.add_argument("count", type=int, help="Number of records to convert")
     parser.add_argument("--shuffle", action="store_true", default=False,
-                        help="是否随机乱序抽取（默认按顺序抽取最前的数据）")
+                        help="Sample randomly (default: take the first records in order)")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    # 检查文件存在
+    # Check that the file exists
     if not os.path.isfile(args.input):
-        print(f"[Error] 文件不存在: {args.input}")
+        print(f"[Error] File not found: {args.input}")
         sys.exit(1)
 
-    # 读取所有行
+    # Read all lines
     with open(args.input, "r", encoding="utf-8") as f:
         lines = [line.strip() for line in f if line.strip()]
 
     total = len(lines)
-    print(f"[Info] 文件共 {total} 条数据")
+    print(f"[Info] File has {total} records")
 
     if args.count > total:
-        print(f"[Warning] 请求 {args.count} 条，但文件只有 {total} 条，将全部导出")
+        print(f"[Warning] Requested {args.count} records but the file has only {total}; exporting all")
         args.count = total
 
-    # 按需抽取
+    # Select records
     if args.shuffle:
         selected_lines = random.sample(lines, args.count)
-        print(f"[Info] 随机抽取 {args.count} 条")
+        print(f"[Info] Randomly selected {args.count} records")
     else:
         selected_lines = lines[:args.count]
-        print(f"[Info] 顺序抽取前 {args.count} 条")
+        print(f"[Info] Selected the first {args.count} records in order")
 
-    # 解析 JSON
+    # Parse JSON
     records = []
     for i, line in enumerate(selected_lines):
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError as e:
-            print(f"[Warning] 第 {i+1} 条解析失败，已跳过: {e}")
+            print(f"[Warning] Record {i+1} failed to parse, skipped: {e}")
 
-    # 生成输出路径（同名同路径，后缀改为 .json）
+    # Build the output path (same name and directory, extension changed to .json)
     base, _ = os.path.splitext(args.input)
     output_path = base + ".json"
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
-    print(f"[Done] 已保存 {len(records)} 条到: {output_path}")
+    print(f"[Done] Saved {len(records)} records to: {output_path}")
 
 
 if __name__ == "__main__":

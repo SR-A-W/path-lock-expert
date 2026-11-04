@@ -1,5 +1,5 @@
 ### Smoke Test: 4×GPU, cutoff_len=65536, GC ON, ZeRO-2
-### 目的: 核心测试 — 验证 4×H200 能否运行 65K 序列训练
+### Purpose: check that 4 GPUs can train at 65K sequence length
 
 ### model
 model_name_or_path: models/qwen3_4b_ple_initialized

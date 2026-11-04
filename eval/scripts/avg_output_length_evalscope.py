@@ -2,11 +2,11 @@
 """
 Average Output Length Statistics Script for EvalScope Results
 
-统计 evalscope 框架运行的 evaluation 结果中每条输出的 token 长度，
-并将统计结果（avg_output_length）写入对应的 reports 目录下的 json 文件中。
+Compute the token length of every output in the evalscope evaluation results,
+and write the statistics (avg_output_length) into the json files under the corresponding reports directory.
 
-输出长度：优先使用 model_output.usage.output_tokens（与 eval 的 max_length 一致），
-若缺失则回退为 content 字符数。
+Output length: prefers model_output.usage.output_tokens (consistent with the eval max_length),
+falling back to the character count of the content if it is missing.
 
 Usage:
     python eval/scripts/avg_output_length_evalscope.py --input-dir eval/results/pl_moe/qwen_pl_moe_140k
@@ -19,7 +19,7 @@ from pathlib import Path
 
 
 def get_output_content(record: dict) -> str:
-    """从单条 prediction 记录中取出模型输出文本。"""
+    """Extract the model output text from a single prediction record."""
     try:
         choices = record.get("model_output", {}).get("choices") or []
         if not choices:
@@ -31,9 +31,9 @@ def get_output_content(record: dict) -> str:
 
 def get_output_length(record: dict) -> int:
     """
-    单条记录的 output length。
-    优先使用 model_output.usage.output_tokens（与 eval 的 max_length 一致）；
-    若缺失则回退为 content 的字符数。
+    Output length of a single record.
+    Prefers model_output.usage.output_tokens (consistent with the eval max_length);
+    falls back to the character count of the content if it is missing.
     """
     try:
         usage = (record.get("model_output") or {}).get("usage")
@@ -47,9 +47,9 @@ def get_output_length(record: dict) -> int:
 
 def parse_subset_from_filename(stem: str, base_name: str) -> str | None:
     """
-    从 prediction 文件名 stem 解析 subset 名。
-    - stem == base_name（如 aime24.jsonl）-> 'default'
-    - stem == base_name_suffix（如 math_500_Level 1、aime24_default）-> 返回 suffix
+    Parse the subset name from the prediction file name stem.
+    - stem == base_name(e.g. aime24.jsonl)-> 'default'
+    - stem == base_name_suffix(e.g. math_500_Level 1, aime24_default) -> return the suffix
     """
     if stem == base_name:
         return "default"
@@ -61,9 +61,9 @@ def parse_subset_from_filename(stem: str, base_name: str) -> str | None:
 
 def collect_lengths_by_subset(predictions_dir: Path, base_name: str) -> tuple[dict[str, list[int]], list[int]]:
     """
-    遍历 predictions_dir 下所有与 base_name 对应的 jsonl 文件，
-    按 subset 收集每条记录的 output length。
-    返回 (by_subset: { "Level 1": [len1, ...], ... }, all_lengths: [])。
+    Iterate over all jsonl files under predictions_dir that correspond to base_name,
+    collecting the output length of every record per subset.
+    Returns (by_subset: { "Level 1": [len1, ...], ... }, all_lengths: [])。
     """
     by_subset: dict[str, list[int]] = {}
     all_lengths: list[int] = []
@@ -92,15 +92,15 @@ def collect_lengths_by_subset(predictions_dir: Path, base_name: str) -> tuple[di
 
 
 def is_run_dir(path: Path) -> bool:
-    """判断 path 是否为单次 run 目录（含 predictions/ 与 reports/）。"""
+    """Check whether path is a single run directory (containing predictions/ and reports/)."""
     return (path / "predictions").is_dir() and (path / "reports").is_dir()
 
 
 def collect_run_dirs_recursive(root: Path) -> list[Path]:
     """
-    从 root 递归查找所有 run 目录（含 predictions/ 与 reports/）。
-    从子目录向根检测：先进入子目录，若当前目录是 run_dir 则加入结果且不再下钻，
-    否则继续递归子目录。这样 root 下任意深度的所有实验 run 都会被收集。
+    Recursively find all run directories (containing predictions/ and reports/) under root.
+    Walk down from the root: if the current directory is a run directory it is added and not descended into,
+    otherwise recurse into its subdirectories. This collects runs at any depth under root.
     """
     root = root.resolve()
     if not root.is_dir():
@@ -124,7 +124,7 @@ def collect_run_dirs_recursive(root: Path) -> list[Path]:
 
 
 def process_one_run(run_dir: Path, dry_run: bool = False) -> tuple[int, int]:
-    """对单个 run 目录执行统计并更新 report。返回 (success, fail)。"""
+    """Compute statistics for a single run directory and update the report. Returns (success, fail)."""
     predictions_root = run_dir / "predictions"
     reports_root = run_dir / "reports"
     success = 0
@@ -136,7 +136,7 @@ def process_one_run(run_dir: Path, dry_run: bool = False) -> tuple[int, int]:
         model_name = model_dir.name
         pred_dir = predictions_root / model_name
         if not pred_dir.is_dir():
-            print(f"  跳过模型 {model_name}: 无对应 predictions")
+            print(f"  Skipping model {model_name}: no matching predictions")
             fail += 1
             continue
 
@@ -144,7 +144,7 @@ def process_one_run(run_dir: Path, dry_run: bool = False) -> tuple[int, int]:
             base_name = report_path.stem
             by_subset, all_lengths = collect_lengths_by_subset(pred_dir, base_name)
             if not by_subset and not all_lengths:
-                print(f"  未找到与 report 对应的 prediction 文件: {report_path}")
+                print(f"  No prediction file found for report: {report_path}")
                 fail += 1
                 continue
 
@@ -168,7 +168,7 @@ def process_one_run(run_dir: Path, dry_run: bool = False) -> tuple[int, int]:
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, ensure_ascii=False, indent=2)
 
-            print(f"  已写入 avg_output_length: {report_path.name} "
+            print(f"  Wrote avg_output_length: {report_path.name} "
                   f"overall={overall_avg}, by_subset={avg_by_subset}")
             success += 1
 
@@ -177,28 +177,28 @@ def process_one_run(run_dir: Path, dry_run: bool = False) -> tuple[int, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="统计 evalscope evaluation 结果中的平均输出长度，并写入对应 reports 的 json"
+        description="Compute the average output length in evalscope evaluation results and write it into the corresponding reports json"
     )
     parser.add_argument(
         "--input-dir", type=str, required=True,
-        help="根目录：将递归扫描其下所有 evalscope 的 run 目录（含 predictions/ 与 reports/）",
+        help="Root directory: all evalscope run directories (containing predictions/ and reports/) below it are scanned recursively",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="只打印统计结果，不写入 report",
+        help="Only print the statistics; do not write to the report",
     )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir).resolve()
     if not input_dir.is_dir():
-        print(f"错误：目录不存在 {input_dir}")
+        print(f"Error: directory does not exist {input_dir}")
         return 1
 
     run_dirs = collect_run_dirs_recursive(input_dir)
-    print(f"共找到 {len(run_dirs)} 个 run 目录\n")
+    print(f"Found {len(run_dirs)} run directories\n")
 
     if not run_dirs:
-        print("未找到任何 run 目录（需含 predictions/ 与 reports/）。")
+        print("No run directory found (it must contain predictions/ and reports/).")
         return 0
 
     total_success = 0
@@ -213,7 +213,7 @@ def main() -> int:
         total_success += s
         total_fail += f
 
-    print(f"\n完成: 成功 {total_success}, 失败 {total_fail}")
+    print(f"\nDone: succeeded {total_success}, failed {total_fail}")
     return 0
 
 

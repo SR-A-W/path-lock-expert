@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""TL-MoE 单元测试模块
+"""PLE unit tests.
 
-包含：
-- test_tl_moe_weights: 权重复制验证测试
+Contains:
+- test_ple_basic / test_llama_ple_basic: config, routing and basic forward-pass tests
+- test_ple_weights_lite / test_ple_weights / test_llama_ple_weights: weight-copy verification tests
+- test_qwen3_ple_routing: string-level control-word routing tests (Qwen3 family)
 """

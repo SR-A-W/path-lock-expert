@@ -23,27 +23,27 @@ logger = logging.get_logger(__name__)
 
 class Qwen2PleConfig(Qwen2Config):
     r"""
-    Path-Lock Expert 配置类，继承自 Qwen2Config。
+    Path-Lock Expert config class, extending Qwen2Config.
 
-    在 Qwen2 基础上增加路由相关配置，用于序列级硬路由：
-    根据 input_ids 中出现的控制 token 决定整条序列走哪个 expert。
+    Adds routing options to Qwen2 for sequence-level hard routing:
+    the control token found in input_ids decides which expert the whole sequence uses.
 
-    路由决策优先级（从高到低）：
-    1. 若同时设置了 think_token_id 和 no_think_token_id，以**最后出现的**控制 token 为准
-    2. 若只设置了其中一个，检测该 token 是否出现
-    3. 若都未设置或均未出现，使用 default_routing_index
+    Routing priority (high to low):
+    1. If both think_token_id and no_think_token_id are set, the **last occurring** control token wins.
+    2. If only one is set, check whether that token occurs.
+    3. If neither is set or none occurs, use default_routing_index.
 
     Args:
         think_token_id (`int`, *optional*):
-            think 模式的控制 token ID。检测到时 → routing_index = 1（expert 1 / think）。
+            Control token ID for think mode. When detected -> routing_index = 1 (expert 1 / think).
         no_think_token_id (`int`, *optional*):
-            no_think 模式的控制 token ID。检测到时 → routing_index = 0（expert 0 / no_think）。
+            Control token ID for no_think mode. When detected -> routing_index = 0 (expert 0 / no_think).
         default_routing_index (`int`, *optional*, defaults to 0):
-            当未检测到任何控制 token、或未配置任何 token ID 时的默认路由。
-            默认为 0（no_think / expert 0），因为初始化阶段共享层来自 Qwen2.5-7B-Instruct，
-            与 expert 0 的 MLP 完全兼容。fine-tune 完成后可根据需求修改。
+            Default route when no control token is detected or no token id is configured.
+            Defaults to 0 (no_think / expert 0): at initialisation the shared layers come from
+            Qwen2.5-7B-Instruct, which is fully compatible with the expert-0 MLP.
         **kwargs:
-            其余参数透传给 `Qwen2Config`。
+            Remaining arguments are passed to `Qwen2Config`.
     """
 
     model_type = "qwen2_ple"

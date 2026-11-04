@@ -1,5 +1,5 @@
 """
-Table 3 -- Each (model x benchmark) saved as a standalone figure.
+Each (model x benchmark) saved as a standalone figure.
 X-axis grouped by mode (Think / No-think), bars represent methods.
 Color by mode: blue=Think, green=No-think.
 Fill: Ours=solid, baselines=hatched. Instruct=gray hatched.
@@ -11,9 +11,9 @@ import numpy as np
 from matplotlib.patches import Patch
 import os
 
-# ── 颜色方案: 按 mode 分配颜色 ──
-DEEP_BLUE  = "#1B3A5C"   # Think 色
-DEEP_GREEN = "#1B5E20"   # No-think 色
+# ── Color scheme: one color per mode ──
+DEEP_BLUE  = "#1B3A5C"   # Think color
+DEEP_GREEN = "#1B5E20"   # No-think color
 GRAY       = "#888888"   # Instruct baseline
 
 plt.rcParams.update({
@@ -100,18 +100,18 @@ for metric_key, minfo in METRIC_INFO.items():
         return 1
     sorted_methods = sorted(methods, key=sort_key)
 
-    # 收集数据，None 也保留（留空位）
+    # Collect data; keep None entries (leave an empty slot)
     think_methods, think_vals = [], []
     nothink_methods, nothink_vals = [], []
     for m in sorted_methods:
         tv, ntv = DATA[model][m][bm]
-        # Think: 除 Instruct 外都占位
+        # Think: every method gets a slot except Instruct
         if m != "Instruct":
             think_methods.append(m)
-            think_vals.append(tv)  # 可能是 None
-        # No-think: 所有方法都占位
+            think_vals.append(tv)  # may be None
+        # No-think: every method gets a slot
         nothink_methods.append(m)
-        nothink_vals.append(ntv)  # 可能是 None
+        nothink_vals.append(ntv)  # may be None
 
     n_think = len(think_methods)
     n_nothink = len(nothink_methods)
@@ -125,7 +125,7 @@ for metric_key, minfo in METRIC_INFO.items():
     nothink_xs = nothink_start + np.arange(n_nothink) * (bw + gap_within)
     nothink_center = nothink_xs.mean() if n_nothink else 0
 
-    # ── Y 轴 (先设置, 再画 bar, 这样数值标签可以用 axes 坐标紧贴 bar) ──
+    # ── Y axis (set before drawing bars so value labels can be placed in axes coordinates right above each bar) ──
     all_v = [v for v in think_vals + nothink_vals if v is not None]
     ymax_data = max(all_v) if all_v else 100
     ymin_auto = min(all_v) if all_v else 0
@@ -138,18 +138,18 @@ for metric_key, minfo in METRIC_INFO.items():
         ymax = ymax_data * 1.35
         ax.set_ylim(ymin, ymax)
 
-    # 数值标签: 用 blended transform 紧贴 bar 顶部 (axes y = bar顶 + 固定小偏移)
+    # Value labels: use a blended transform to sit right above the bar top (axes y = bar top + fixed small offset)
     from matplotlib.transforms import blended_transform_factory
     trans_val = blended_transform_factory(ax.transData, ax.transAxes)
 
     def _bar_label(x_pos, val, fmt):
-        """在 bar 顶部紧贴放置数值标签"""
+        """Place the value label right above the bar top."""
         disp = ax.transData.transform((0, val))
         _, val_axes_y = ax.transAxes.inverted().transform(disp)
         ax.text(x_pos, val_axes_y + 0.03, f"{val:{fmt}}", transform=trans_val,
                 ha="center", va="bottom", fontsize=12, color="#222", fontweight="bold")
 
-    # ── 画 Think 组 ──
+    # ── Draw the Think group ──
     for i, (m, v) in enumerate(zip(think_methods, think_vals)):
         is_ours = (m == "Ours")
         if v is not None:
@@ -161,7 +161,7 @@ for metric_key, minfo in METRIC_INFO.items():
             ax.text(think_xs[i], 0.02, "N/A", transform=trans_val,
                     ha="center", va="bottom", fontsize=10, color="#999", fontstyle="italic")
 
-    # ── 画 No-think 组 ──
+    # ── Draw the No-think group ──
     for i, (m, v) in enumerate(zip(nothink_methods, nothink_vals)):
         is_ours = (m == "Ours")
         col = GRAY if m == "Instruct" else DEEP_GREEN
@@ -206,10 +206,10 @@ for metric_key, minfo in METRIC_INFO.items():
                 else:
                     d_color = "#2B8C2B" if delta <= 0 else "#CC3333"
 
-            # 将 baseline bar 顶端转为 axes 坐标, 在其上方放 delta
+            # Convert the baseline bar top to axes coordinates and place the delta above it
             disp_bl = ax.transData.transform((0, bl_v))
             _, bl_axes_y = ax.transAxes.inverted().transform(disp_bl)
-            # 每个 delta 独立定位在自己 baseline bar 上方, 留空间给数值标签
+            # Each delta is positioned above its own baseline bar, leaving room for the value label
             label_y = min(bl_axes_y + 0.18 + rank * 0.10, 0.97)
             ax.text(bl_x, label_y, delta_text, transform=trans_blend,
                     ha="center", va="bottom", fontsize=11, color=d_color, fontweight="bold",
@@ -218,7 +218,7 @@ for metric_key, minfo in METRIC_INFO.items():
     draw_deltas(think_methods, think_vals, think_xs, is_think_group=True)
     draw_deltas(nothink_methods, nothink_vals, nothink_xs, is_think_group=False)
 
-    # ── X 轴 ──
+    # ── X axis ──
     all_xs = list(think_xs) + list(nothink_xs)
     all_labels = think_methods + nothink_methods
     ax.set_xticks(all_xs)
@@ -246,7 +246,7 @@ for metric_key, minfo in METRIC_INFO.items():
     if has_bl_t:       filtered.append(Patch(fc=DEEP_BLUE, ec="w", label="Baseline (Think)", hatch="///", alpha=0.70))
     if has_bl_nt:      filtered.append(Patch(fc=DEEP_GREEN, ec="w", label="Baseline (No-think)", hatch="///", alpha=0.70))
     if has_instruct:   filtered.append(Patch(fc=GRAY, ec="w", label="Instruct (No-think)", hatch="///", alpha=0.70))
-    # Legend 在所有 refl 图中显示, 放右上角
+    # Show the legend in all refl plots, in the upper right corner
     if metric_key == "refl":
         ax.legend(handles=filtered, fontsize=10, loc="upper right",
                   handlelength=1.2, handletextpad=0.3, borderpad=0.3,

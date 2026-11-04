@@ -41,9 +41,9 @@ from .configuration_phi4_mini_ple import Phi4MiniPleConfig
 
 
 class Phi4MiniPleExpertMLP(nn.Module):
-    """单个 MLP 专家（与 Phi3MLP 结构完全一致），用于 PLE 的双专家容器。
+    """A single MLP expert (identical in structure to Phi3MLP), used in the PLE two-expert container.
 
-    Phi3MLP 结构：
+    Phi3MLP structure:
     - gate_up_proj: Linear(hidden_size, 2 * intermediate_size, bias=False)
     - down_proj: Linear(intermediate_size, hidden_size, bias=False)
     - forward: gate, up = gate_up_proj(x).chunk(2); down_proj(up * act_fn(gate))
@@ -67,12 +67,12 @@ class Phi4MiniPleExpertMLP(nn.Module):
 
 
 class Phi4MiniPleMLP(nn.Module):
-    """Path-Lock 双专家 MLP 容器。
+    """Path-Lock two-expert MLP container.
 
-    包含两个独立的 MLP 专家：
-    - experts[0]：no_think 专家
-    - experts[1]：think 专家
-    根据 routing_index 选择使用哪个专家，整条序列一致。
+    Holds two independent MLP experts:
+    - experts[0]: no_think expert
+    - experts[1]: think expert
+    routing_index selects which expert is used; the whole sequence uses the same one.
     """
 
     def __init__(self, config: Phi4MiniPleConfig):
@@ -251,20 +251,20 @@ class Phi4MiniPleRMSNorm(nn.Module):
 
 
 class Phi4MiniPleDecoderLayer(GradientCheckpointingLayer):
-    """Decoder 层：Attention 与 Phi3 一致，MLP 替换为 Phi4MiniPleMLP，forward 透传 routing_index。
+    """Decoder layer: attention is identical to Phi3, the MLP is replaced by Phi4MiniPleMLP, and forward passes routing_index through.
 
-    Phi3 Attention 特点（共享层，不涉及 expert 分离）：
-    - 融合 qkv_proj（Q/K/V 合并为一个 Linear）
-    - 无 attention bias
-    - 支持 partial_rotary_factor
-    - 有 resid_attn_dropout 和 resid_mlp_dropout
+    Phi3 attention (shared layer, not split per expert):
+    - Fused qkv_proj (Q/K/V merged into one Linear)
+    - No attention bias
+    - Supports partial_rotary_factor
+    - Has resid_attn_dropout and resid_mlp_dropout
     """
 
     def __init__(self, config: Phi4MiniPleConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = Phi4MiniPleAttention(config=config, layer_idx=layer_idx)
-        # 将父类创建的 Phi3MLP 替换为 PLE 双专家容器
+        # Replace the Phi3MLP created by the parent class with the PLE two-expert container
         self.mlp = Phi4MiniPleMLP(config)
         self.input_layernorm = Phi4MiniPleRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = Phi4MiniPleRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -286,7 +286,7 @@ class Phi4MiniPleDecoderLayer(GradientCheckpointingLayer):
     ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        # Self Attention（共享层，融合 qkv_proj）
+        # Self Attention (shared layer, fused qkv_proj)
         hidden_states, _ = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -299,7 +299,7 @@ class Phi4MiniPleDecoderLayer(GradientCheckpointingLayer):
         )
         hidden_states = residual + self.resid_attn_dropout(hidden_states)
 
-        # Fully Connected（路由到指定 expert）
+        # Fully Connected (routed to the selected expert)
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states, routing_index=routing_index)
@@ -362,30 +362,30 @@ class Phi4MiniPleRotaryEmbedding(nn.Module):
 
 
 def _determine_routing_index(input_ids: torch.LongTensor, config: Phi4MiniPleConfig) -> int:
-    """根据 input_ids 中的控制 token 确定路由索引。
+    """Determine the routing index from the control tokens in input_ids.
 
-    路由决策逻辑：
-    1. 若 think_token_id 和 no_think_token_id 均未配置 → 返回 default_routing_index
-    2. 扫描 input_ids，找到两种控制 token 各自最后出现的位置
-    3. 以最后出现的控制 token 为准
-    4. 若均未找到 → 返回 default_routing_index
+    Routing logic:
+    1. If neither think_token_id nor no_think_token_id is configured -> return default_routing_index
+    2. Scan input_ids for the last position of each control token
+    3. The control token occurring last wins
+    4. If neither is found -> return default_routing_index
 
     Args:
-        input_ids: 输入 token 序列，shape [batch_size, seq_len]
-        config: PLE 配置
+        input_ids: input token sequence, shape [batch_size, seq_len]
+        config: PLE config
 
     Returns:
-        int: 0（no_think / expert 0）或 1（think / expert 1）
+        int: 0 (no_think / expert 0) or 1 (think / expert 1)
     """
     think_id = config.think_token_id
     no_think_id = config.no_think_token_id
     default_idx = getattr(config, "default_routing_index", 0)
 
-    # 未配置任何控制 token → 直接返回默认值
+    # No control token configured -> return the default
     if think_id is None and no_think_id is None:
         return default_idx
 
-    # 在整个 batch 的 input_ids 中查找各控制 token 最后出现的位置
+    # Find the last position of each control token across the whole batch
     last_think_pos = -1
     last_no_think_pos = -1
 
@@ -399,30 +399,30 @@ def _determine_routing_index(input_ids: torch.LongTensor, config: Phi4MiniPleCon
         if no_think_mask.any():
             last_no_think_pos = no_think_mask.nonzero()[-1, -1].item()
 
-    # 两种控制 token 均未在 input_ids 中找到 → 使用默认值
+    # Neither control token found in input_ids -> use the default
     if last_think_pos == -1 and last_no_think_pos == -1:
         return default_idx
 
-    # 以最后出现的控制 token 为准
+    # The control token occurring last wins
     if last_think_pos > last_no_think_pos:
-        return 1  # think 模式
+        return 1  # think mode
     else:
-        return 0  # no_think 模式
+        return 0  # no_think mode
 
 
 @auto_docstring
 class Phi4MiniPleModel(Phi4MiniPlePreTrainedModel):
-    """骨干模型：在 forward 开头确定 routing_index，并透传给每一层的 MLP。
+    """Backbone model: determines routing_index at the start of forward and passes it to every layer's MLP.
 
-    routing_index 的来源（按优先级）：
-    1. kwargs 中显式传入的 routing_index
-    2. 根据 input_ids 中的控制 token 自动计算（训练阶段）
-    3. 兜底使用 config.default_routing_index（默认 = 0 / no_think）
+    Sources of routing_index (by priority):
+    1. routing_index passed explicitly in kwargs
+    2. Computed from the control tokens in input_ids
+    3. Fallback to config.default_routing_index (default = 0 / no_think)
 
-    与 Phi3Model 的区别：
-    - layers 使用 Phi4MiniPleDecoderLayer（双专家 MLP）
-    - forward 增加 routing_index 检测和透传
-    - causal mask 使用 Phi3 的简单模式（非 Qwen3 的 causal_mask_mapping 模式）
+    Differences from Phi3Model:
+    - layers use Phi4MiniPleDecoderLayer (two-expert MLP)
+    - forward detects and passes through routing_index
+    - the causal mask uses Phi3's simple scheme (not Qwen3's causal_mask_mapping)
     """
 
     def __init__(self, config: Phi4MiniPleConfig):
@@ -431,7 +431,7 @@ class Phi4MiniPleModel(Phi4MiniPlePreTrainedModel):
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        # 将父类创建的 Phi3DecoderLayer 替换为 Phi4MiniPleDecoderLayer
+        # Replace the Phi3DecoderLayer created by the parent class with Phi4MiniPleDecoderLayer
         self.layers = nn.ModuleList(
             [Phi4MiniPleDecoderLayer(config, layer_idx=i) for i in range(config.num_hidden_layers)]
         )
@@ -454,7 +454,7 @@ class Phi4MiniPleModel(Phi4MiniPlePreTrainedModel):
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> BaseModelOutputWithPast:
-        # ===== 路由决策 =====
+        # ===== Routing decision =====
         routing_index = kwargs.pop("routing_index", None)
 
         if routing_index is None and input_ids is not None:
@@ -481,7 +481,7 @@ class Phi4MiniPleModel(Phi4MiniPlePreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        # Phi3 的 causal mask 模式：根据是否有 sliding_window 选择 mask 函数
+        # Phi3 causal mask scheme: pick the mask function depending on whether sliding_window is set
         mask_function = create_causal_mask if self.config.sliding_window is None else create_sliding_window_causal_mask
         causal_mask = mask_function(
             config=self.config,
@@ -517,9 +517,9 @@ class Phi4MiniPleModel(Phi4MiniPlePreTrainedModel):
 
 @auto_docstring
 class Phi4MiniPleForCausalLM(Phi4MiniPlePreTrainedModel, GenerationMixin):
-    """Causal LM 顶层：使用 Phi4MiniPleModel 作为 backbone。
+    """Top-level causal LM using Phi4MiniPleModel as the backbone.
 
-    重写 prepare_inputs_for_generation 以在 generate 阶段正确传递路由决策。
+    Overrides prepare_inputs_for_generation to pass the routing decision correctly during generate.
     """
 
     _tied_weights_keys = ["lm_head.weight"]
@@ -612,11 +612,11 @@ class Phi4MiniPleForCausalLM(Phi4MiniPlePreTrainedModel, GenerationMixin):
         routing_index=None,
         **kwargs,
     ):
-        """重写以在 generate 阶段正确传递路由决策。
+        """Overridden to pass the routing decision correctly during generate.
 
-        路由优先级：
-        1. 用户通过 generate(routing_index=N) 显式传入
-        2. 从 input_ids 中的控制 token 自动检测
+        Routing priority:
+        1. Passed explicitly by the user via generate(routing_index=N)
+        2. Detected automatically from the control tokens in input_ids
         3. config.default_routing_index
         """
         if routing_index is not None:
