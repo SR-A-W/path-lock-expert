@@ -123,8 +123,7 @@ Benchmarks used in the paper: **MATH500**, **AIME24**, **MMLU-STEM**, **GPQA-Dia
 │   └── data/                   ← training data (regenerate via src/datasets/)
 │
 ├── eval/
-│   ├── scripts/                ← evaluation post-processing, table/plot generation
-│   └── results_summary.csv     ← aggregated evaluation results
+│   └── scripts/                ← evaluation post-processing, table/plot generation, LLM-judge
 │
 ├── models/                     ← model weights (see models/README.md)
 └── slurm_examples/             ← representative SLURM scripts
@@ -151,6 +150,7 @@ Three external frameworks are used but not vendored. Each directory contains a `
 | Dataset ablation plots | `eval/scripts/generate_plots_ablation_dataset.py` |
 | Average output length stats | `eval/scripts/avg_output_length_evalscope.py` |
 | Reflective-token stats | `eval/scripts/reflective_token_stats_evalscope.py` |
+| LLM-judge validation of #Refl./Ans. (implicit leakage) | `eval/scripts/implicit_leakage_judge.py` |
 
 ## Citation
 
